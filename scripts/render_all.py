@@ -9,7 +9,7 @@ import math
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import Pool
 from PIL import Image, ImageDraw
 
 
@@ -100,11 +100,12 @@ def render_all_fast(input_dir: Path, output_dir: Path,
         return
 
     failed = 0
-    with ProcessPoolExecutor(max_workers=workers) as executor:
-        futures = {executor.submit(render_model, t): t for t in tasks}
+    # Use maxtasksperchild to recycle workers and avoid memory leaks
+    from multiprocessing import Pool
+    with Pool(processes=workers, maxtasksperchild=50) as pool:
         with tqdm(total=len(tasks), desc="Rendering") as pbar:
-            for future in as_completed(futures):
-                if not future.result():
+            for result in pool.imap_unordered(render_model, tasks, chunksize=1):
+                if not result:
                     failed += 1
                 pbar.update(1)
 
