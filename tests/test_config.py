@@ -10,8 +10,8 @@ def test_config_defaults():
     assert cfg.faiss_nlist == 1024
     assert cfg.faiss_nprobe == 64
     assert cfg.lora_rank == 16
-    assert cfg.batch_size_phase1 == 512
-    assert cfg.batch_size_phase2 == 256
+    assert cfg.batch_size_phase1 == 1024
+    assert cfg.batch_size_phase2 == 512
     assert cfg.lr_phase1 == 1e-3
     assert cfg.lr_phase2 == 5e-4
     assert cfg.temperature == 0.07

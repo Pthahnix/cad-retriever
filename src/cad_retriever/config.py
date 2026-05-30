@@ -16,10 +16,10 @@ class Config:
     faiss_nlist: int = 1024
     faiss_nprobe: int = 64
 
-    # Training
+    # Training — tuned for RTX 5090 (31GB VRAM)
     lora_rank: int = 16
-    batch_size_phase1: int = 512
-    batch_size_phase2: int = 256
+    batch_size_phase1: int = 1024
+    batch_size_phase2: int = 512
     lr_phase1: float = 1e-3
     lr_phase2: float = 5e-4
     temperature: float = 0.07
