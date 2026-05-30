@@ -1,0 +1,2 @@
+- [Project State](project_state.md) — ABC download running in background, pipeline ready to execute
+- [Environment Setup](environment.md) — RTX 5090, Blender 4.5.4, OCP, faiss, proxy config
