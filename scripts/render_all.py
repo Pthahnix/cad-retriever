@@ -28,7 +28,7 @@ def render_silhouette(verts, faces, elev_deg, azim_deg, size=224):
     py = size - 1 - ((Vr[:, 2] + 1.5) / 3.0 * size * 0.8 + size * 0.1).astype(int)
     img = Image.new('RGB', (size, size), 'white')
     draw = ImageDraw.Draw(img)
-    f_sample = faces[np.random.choice(len(faces), min(3000, len(faces)), replace=False)]
+    f_sample = faces[np.random.choice(len(faces), min(1000, len(faces)), replace=False)]
     for tri in f_sample:
         pts = [(int(px[v].clip(0, size-1)), int(py[v].clip(0, size-1))) for v in tri]
         draw.polygon(pts, fill=(200, 200, 200), outline=(0, 0, 0))
@@ -47,9 +47,9 @@ def render_model(args_tuple):
         def _timeout_handler(signum, frame):
             raise TimeoutError(f"Timeout processing {step_path}")
 
-        # 30s timeout per model — skip complex assemblies
+        # 15s timeout per model — skip complex assemblies
         signal.signal(signal.SIGALRM, _timeout_handler)
-        signal.alarm(30)
+        signal.alarm(15)
 
         try:
             from OCP.STEPControl import STEPControl_Reader
@@ -62,7 +62,7 @@ def render_model(args_tuple):
                 return False
             reader.TransferRoots()
             shape = reader.OneShape()
-            BRepMesh_IncrementalMesh(shape, 0.5).Perform()
+            BRepMesh_IncrementalMesh(shape, 1.0).Perform()  # coarser mesh = faster
         finally:
             signal.alarm(0)
 
