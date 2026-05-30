@@ -42,20 +42,29 @@ def render_model(args_tuple):
         return True
     output_dir.mkdir(parents=True, exist_ok=True)
     try:
-        from OCP.STEPControl import STEPControl_Reader
-        from OCP.BRepMesh import BRepMesh_IncrementalMesh
-        from OCP.BRep import BRep_Tool
-        from OCP.TopExp import TopExp_Explorer
-        from OCP.TopAbs import TopAbs_FACE
-        from OCP.BRepAdaptor import BRepAdaptor_Surface
-        import trimesh, tempfile
+        import signal
 
-        reader = STEPControl_Reader()
-        if reader.ReadFile(str(step_path)) != 1:
-            return False
-        reader.TransferRoots()
-        shape = reader.OneShape()
-        BRepMesh_IncrementalMesh(shape, 0.5).Perform()
+        def _timeout_handler(signum, frame):
+            raise TimeoutError(f"Timeout processing {step_path}")
+
+        # 30s timeout per model — skip complex assemblies
+        signal.signal(signal.SIGALRM, _timeout_handler)
+        signal.alarm(30)
+
+        try:
+            from OCP.STEPControl import STEPControl_Reader
+            from OCP.BRepMesh import BRepMesh_IncrementalMesh
+            import trimesh, tempfile
+
+            reader = STEPControl_Reader()
+            if reader.ReadFile(str(step_path)) != 1:
+                signal.alarm(0)
+                return False
+            reader.TransferRoots()
+            shape = reader.OneShape()
+            BRepMesh_IncrementalMesh(shape, 0.5).Perform()
+        finally:
+            signal.alarm(0)
 
         with tempfile.NamedTemporaryFile(suffix='.stl', delete=False) as f:
             stl_path = f.name
