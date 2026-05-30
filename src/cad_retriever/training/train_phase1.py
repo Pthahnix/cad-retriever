@@ -2,8 +2,7 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from pathlib import Path
-import numpy as np
+from torch.cuda.amp import GradScaler, autocast
 from tqdm import tqdm
 
 from cad_retriever.config import Config
@@ -17,6 +16,7 @@ def train_phase1(config: Config, model_ids: list[str]):
     encoder = CADEncoder(embed_dim=config.embed_dim).to(device)
     loss_fn = ViewConsistencyLoss()
     optimizer = AdamW(encoder.projection.parameters(), lr=config.lr_phase1)
+    scaler = GradScaler()
 
     dataset = Phase1Dataset(
         renders_dir=config.renders_dir,
@@ -35,12 +35,14 @@ def train_phase1(config: Config, model_ids: list[str]):
         with torch.no_grad():
             feats = encoder.encode_single_view(flat)  # (B*V, clip_dim)
         feats = feats.reshape(B, V, -1)
-        projected = encoder.projection(feats.reshape(B * V, -1))
-        projected = projected.reshape(B, V, -1)
-        loss = loss_fn(projected)
+        with autocast():
+            projected = encoder.projection(feats.reshape(B * V, -1))
+            projected = projected.reshape(B, V, -1)
+            loss = loss_fn(projected)
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
         scheduler.step()
 
     # Save projection head

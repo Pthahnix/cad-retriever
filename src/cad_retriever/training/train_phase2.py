@@ -2,12 +2,12 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from pathlib import Path
+from torch.cuda.amp import GradScaler, autocast
 from tqdm import tqdm
 
 from cad_retriever.config import Config
 from cad_retriever.models.encoder import SketchEncoder
-from cad_retriever.models.lora import apply_lora, count_trainable_params
+from cad_retriever.models.lora import apply_lora
 from cad_retriever.training.dataset import Phase2Dataset
 from cad_retriever.training.losses import InfoNCELoss
 
@@ -19,6 +19,7 @@ def train_phase2(config: Config, model_ids: list[str], num_epochs: int = 10):
     encoder = encoder.to(device)
 
     loss_fn = InfoNCELoss(temperature=config.temperature).to(device)
+    scaler = GradScaler()
 
     trainable = [p for p in encoder.parameters() if p.requires_grad]
     trainable += list(loss_fn.parameters())
@@ -41,12 +42,14 @@ def train_phase2(config: Config, model_ids: list[str], num_epochs: int = 10):
         for batch in tqdm(loader, desc=f"Phase 2 Epoch {epoch+1}"):
             sketches = batch["sketch"].to(device)
             cad_embs = batch["cad_embedding"].to(device)
-            sketch_embs = encoder(sketches)
-            cad_embs = torch.nn.functional.normalize(cad_embs, dim=-1)
-            loss = loss_fn(sketch_embs, cad_embs)
+            with autocast():
+                sketch_embs = encoder(sketches)
+                cad_embs_norm = torch.nn.functional.normalize(cad_embs, dim=-1)
+                loss = loss_fn(sketch_embs, cad_embs_norm)
             optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
             scheduler.step()
             total_loss += loss.item()
         avg_loss = total_loss / len(loader)
