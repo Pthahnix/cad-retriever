@@ -47,9 +47,9 @@ def render_model(args_tuple):
         def _timeout_handler(signum, frame):
             raise TimeoutError(f"Timeout processing {step_path}")
 
-        # 15s timeout per model — skip complex assemblies
+        # 5s timeout per model — skip complex assemblies to maintain throughput
         signal.signal(signal.SIGALRM, _timeout_handler)
-        signal.alarm(15)
+        signal.alarm(5)
 
         try:
             from OCP.STEPControl import STEPControl_Reader
