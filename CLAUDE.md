@@ -93,6 +93,25 @@ python scripts/train.py --phase 2 --data-root /home/cc/data --epochs 10
 - Proxy: `http_proxy=http://127.0.0.1:7890` (mihomo, required for GitHub/HuggingFace/PyPI)
 - GPU: NVIDIA RTX 5090, CUDA available via PyTorch 2.8.0+cu128
 
+## Critical: Self-Monitoring Cron
+
+You MUST set up a recurring self-check every 30 minutes using Claude Code's built-in cron/scheduling capability. At the start of your session, create a cron that fires every 30 minutes with a prompt like:
+
+```
+Self-check: Am I still making progress? Review what I've done in the last 30 minutes. If I'm stuck, diagnose and fix. If a long-running process is active (download, training, rendering), verify it's still running and report progress. If I've finished all code tasks but haven't started the data pipeline, START IT NOW. My job is not done until the full pipeline has run end-to-end and I have a working, deployed service.
+```
+
+**Your job is NOT done when code is written.** Your job is done when:
+1. All 13 code tasks are implemented and tests pass
+2. The full 1M dataset is downloaded, converted, rendered, and preprocessed
+3. Phase 1 and Phase 2 training have completed on the full dataset
+4. Evaluation metrics meet targets (recall@1 >= 0.60, recall@10 >= 0.90, MRR >= 0.70)
+5. The FAISS index is built from all 1M embeddings
+6. The FastAPI serving endpoint is running and responding to queries
+7. All work is committed and pushed
+
+If you finish writing code and stop — you have failed. The deliverable is a **working, trained, deployed system**, not source code.
+
 ## Git Workflow
 
 - Commit after each completed task
