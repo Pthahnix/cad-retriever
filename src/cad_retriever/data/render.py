@@ -14,7 +14,7 @@ CAMERA_ANGLES = [
     (-90, 0, 0),    # bottom
 ]
 
-BLENDER_SCRIPT = '''
+BLENDER_BIN = "/home/cc/data/blender-4.5.4-linux-x64/blender-wrapper.sh"
 import bpy
 import sys
 import json
@@ -69,7 +69,7 @@ def render_model(input_path: Path, output_dir: Path, image_size: int = 224):
         "angles": CAMERA_ANGLES,
     })
     subprocess.run(
-        ["blender", "--background", "--python-expr", BLENDER_SCRIPT, "--", args_json],
+        [BLENDER_BIN, "--background", "--python-expr", BLENDER_SCRIPT, "--", args_json],
         check=True, capture_output=True,
     )
 
