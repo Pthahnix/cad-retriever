@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CAD-Retriever — 技术决策概览</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Inter:wght@400;500;700&display=swap');
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-warm: #FEF3C7;
+      --color-mint: #D1FAE5;
+      --color-blue: #DBEAFE;
+      --color-pink: #FCE7F3;
+      --text: #4B5563;
+      --text-dark: #1F2937;
+      --accent-warm: #D97706;
+      --accent-mint: #059669;
+      --accent-blue: #2563EB;
+      --accent-pink: #DB2777;
+      --font-sans: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'Fira Code', 'Cascadia Code', Consolas, monospace;
+    }
+    html, body { height: 100%; overflow: hidden; font-family: var(--font-sans); color: var(--text); }
+    .slide-container { position: relative; width: 100vw; height: 100vh; }
+    .slide {
+      position: absolute; inset: 0; padding: 3.5rem 5rem;
+      display: flex; flex-direction: column; justify-content: center;
+      opacity: 0; visibility: hidden; transition: opacity 0.5s ease;
+    }
+    .slide.active { opacity: 1; visibility: visible; }
+    h1 { font-size: clamp(2rem, 4.5vw, 3.5rem); font-weight: 700; color: var(--text-dark); margin-bottom: 1.2rem; line-height: 1.15; }
+    h2 { font-size: clamp(1.1rem, 2.5vw, 1.8rem); font-weight: 500; margin-bottom: 1rem; color: var(--text); }
+    h3 { font-size: clamp(1rem, 2vw, 1.4rem); font-weight: 600; margin-bottom: 0.6rem; color: var(--text-dark); }
+    p, li { font-size: clamp(0.9rem, 1.6vw, 1.15rem); line-height: 1.7; }
+    ul { list-style: none; padding: 0; }
+    ul li { padding: 0.35rem 0; padding-left: 1.4rem; position: relative; }
+    ul li::before { content: ''; position: absolute; left: 0; top: 50%; width: 7px; height: 7px; border-radius: 50%; transform: translateY(-50%); }
+    code { font-family: var(--font-mono); font-size: 0.85em; padding: 0.15em 0.4em; background: rgba(0,0,0,0.06); border-radius: 3px; }
+    pre { font-family: var(--font-mono); background: rgba(0,0,0,0.04); padding: 1.2rem 1.5rem; border-radius: 8px; overflow-x: auto; font-size: 0.85em; line-height: 1.6; white-space: pre; }
+    table { width: 100%; border-collapse: collapse; font-size: clamp(0.8rem, 1.4vw, 1rem); }
+    th, td { padding: 0.5rem 0.8rem; text-align: left; border-bottom: 1px solid rgba(0,0,0,0.08); }
+    th { font-weight: 600; color: var(--text-dark); }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.5rem; align-items: start; }
+    .card { background: rgba(255,255,255,0.7); border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .tag { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; margin-right: 0.4rem; }
+    .subtitle { font-size: clamp(1rem, 2vw, 1.4rem); color: var(--text); opacity: 0.8; margin-top: 0.5rem; }
+    .big-number { font-size: clamp(2.5rem, 6vw, 4.5rem); font-weight: 700; line-height: 1; }
+    .slide-number { position: absolute; bottom: 1.5rem; right: 2rem; font-size: 0.8rem; color: rgba(0,0,0,0.3); }
+    @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes fadeInLeft { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
+    @keyframes scaleIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+    .slide.active .anim-up { animation: fadeInUp 0.6s ease both; }
+    .slide.active .anim-left { animation: fadeInLeft 0.6s ease both; }
+    .slide.active .anim-scale { animation: scaleIn 0.5s ease both; }
+    .anim-up, .anim-left, .anim-scale { opacity: 0; }
+    .slide.active .stagger-1 { animation-delay: 0.1s; }
+    .slide.active .stagger-2 { animation-delay: 0.2s; }
+    .slide.active .stagger-3 { animation-delay: 0.3s; }
+    .slide.active .stagger-4 { animation-delay: 0.4s; }
+    .slide.active .stagger-5 { animation-delay: 0.5s; }
+    .css-chart { display: flex; flex-direction: column; gap: 10px; padding: 0.8rem 0; }
+    .css-bar { position: relative; height: 30px; background: rgba(0,0,0,0.05); border-radius: 4px; overflow: hidden; }
+    .css-bar::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: var(--value, 0%); border-radius: 4px; transition: width 1s ease; }
+    .css-bar::after { content: attr(data-label) ' — ' attr(data-value); position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: 13px; color: var(--text-dark); z-index: 1; white-space: nowrap; font-weight: 500; }
+    .slide:not(.active) .css-bar::before { width: 0; }
+    #progress-bar { position: fixed; top: 0; left: 0; height: 3px; background: var(--accent-blue); transition: width 0.3s; z-index: 9999; }
+    @media print { .slide { position: relative; opacity: 1; visibility: visible; page-break-after: always; height: auto; min-height: 100vh; } #progress-bar { display: none; } }
+  </style>
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="slide-container">
+
+    <!-- Slide 1: 封面 -->
+    <div class="slide" style="background: var(--color-warm); text-align: center; justify-content: center; align-items: center;">
+      <h1 class="anim-scale" style="font-size: clamp(2.5rem, 5.5vw, 4.2rem); color: var(--text-dark);">CAD-Retriever</h1>
+      <p class="subtitle anim-up stagger-2" style="font-size: clamp(1.1rem, 2.2vw, 1.6rem); max-width: 700px;">跨模态 CAD 零件检索系统<br>自然语言 + 草图 → 百万级模型库实时检索</p>
+      <div class="anim-up stagger-3" style="margin-top: 2rem; display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center;">
+        <span class="tag" style="background: rgba(217,119,6,0.15); color: var(--accent-warm);">CLIP 范式</span>
+        <span class="tag" style="background: rgba(37,99,235,0.1); color: var(--accent-blue);">FAISS GPU</span>
+        <span class="tag" style="background: rgba(5,150,105,0.1); color: var(--accent-mint);">端到端 &lt;10ms</span>
+        <span class="tag" style="background: rgba(219,39,119,0.1); color: var(--accent-pink);">RTX 5090</span>
+      </div>
+      <div class="slide-number">1</div>
+    </div>
+
+    <!-- Slide 2: 问题与动机 -->
+    <div class="slide" style="background: var(--color-mint);">
+      <h1 class="anim-up">问题：找一个零件有多难？</h1>
+      <div class="grid-2" style="margin-top: 1.5rem;">
+        <div class="card anim-up stagger-1">
+          <h3 style="color: var(--accent-warm);">传统方式</h3>
+          <ul style="margin-top: 0.8rem;">
+            <li style="color: var(--text);">人工翻阅 CAD 目录和分类树</li>
+            <li style="color: var(--text);">依赖文件名和文件夹结构</li>
+            <li style="color: var(--text);">无法按"形状"或"功能"搜索</li>
+            <li style="color: var(--text);">平均耗时 5-15 分钟/次</li>
+          </ul>
+          <ul><li style="list-style:none; padding-left:0; margin-top:0.8rem;"><span class="big-number" style="color: var(--accent-warm); font-size: 2rem;">分钟级</span></li></ul>
+        </div>
+        <div class="card anim-up stagger-2">
+          <h3 style="color: var(--accent-mint);">CAD-Retriever</h3>
+          <ul style="margin-top: 0.8rem;">
+            <li style="color: var(--text);">输入自然语言："带三个孔的法兰盘"</li>
+            <li style="color: var(--text);">或画一张草图 / 上传工程图</li>
+            <li style="color: var(--text);">或两者组合，互相约束</li>
+            <li style="color: var(--text);">从 1M 零件中实时返回结果</li>
+          </ul>
+          <ul><li style="list-style:none; padding-left:0; margin-top:0.8rem;"><span class="big-number" style="color: var(--accent-mint); font-size: 2rem;">&lt;10ms</span></li></ul>
+        </div>
+      </div>
+      <div class="slide-number">2</div>
+    </div>
+
+    <!-- Slide 3: 系统架构总览 -->
+    <div class="slide" style="background: var(--color-blue);">
+      <h1 class="anim-up">系统架构</h1>
+      <h2 class="anim-up stagger-1">CLIP 对比学习 + FAISS 向量检索，两阶段解耦</h2>
+      <div class="grid-2" style="margin-top: 1.2rem;">
+        <div class="card anim-up stagger-2" style="border-left: 4px solid var(--accent-blue);">
+          <h3>离线阶段 — Index Building</h3>
+          <pre style="font-size: 0.78em; margin-top: 0.6rem; background: rgba(37,99,235,0.05);">
+CAD 零件
+  ├─→ B-Rep Transformer ──┐
+  │                        ├─ Late Fusion ─→ FAISS
+  └─→ 多视图 ViT ─────────┘   (α=0.7)     Index
+                                             │
+                              序列化到磁盘 ←──┘</pre>
+          <p style="margin-top: 0.6rem; font-size: 0.9rem;">CAD embedding 全量离线预计算，不受延迟约束</p>
+        </div>
+        <div class="card anim-up stagger-3" style="border-left: 4px solid var(--accent-mint);">
+          <h3>在线阶段 — Query & Retrieval</h3>
+          <pre style="font-size: 0.78em; margin-top: 0.6rem; background: rgba(5,150,105,0.05);">
+用户输入
+  ├─ 文本 → Text Encoder ────┐
+  │                           ├─ Cross-Attn
+  └─ 图示 → Image Encoder ──┘   Fusion
+                                  │
+                            Query Vector
+                                  │
+                   FAISS Top-100 → Rerank → Top-K</pre>
+          <p style="margin-top: 0.6rem; font-size: 0.9rem;">单模态跳过融合层，保证最低延迟路径</p>
+        </div>
+      </div>
+      <div class="slide-number">3</div>
+    </div>
+
+    <!-- Slide 4: 核心设计决策 -->
+    <div class="slide" style="background: var(--color-pink);">
+      <h1 class="anim-up">核心设计决策</h1>
+      <table class="anim-up stagger-1" style="margin-top: 1.2rem;">
+        <thead>
+          <tr><th>决策点</th><th>选择</th><th>为什么</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>CAD 侧融合</td><td><code>α·BRep + (1-α)·MV</code></td><td>离线计算，简单可靠，α=0.7 偏向拓扑</td></tr>
+          <tr><td>Query 侧融合</td><td>Cross-Attention</td><td>文本约束图示语义（"这个形状，但要三个孔"）</td></tr>
+          <tr><td>单模态处理</td><td>跳过融合层</td><td>纯文本 ~0.8ms，不引入不必要的计算</td></tr>
+          <tr><td>Embedding 维度</td><td>512 维统一空间</td><td>平衡表达力与检索效率，FAISS 索引 ~2GB</td></tr>
+          <tr><td>检索粒度</td><td>零件级</td><td>工程实际需求，装配体太粗、特征级太细</td></tr>
+          <tr><td>Query 类型</td><td>文本 / 图示 / 混合</td><td>覆盖所有实际使用场景</td></tr>
+        </tbody>
+      </table>
+      <div class="slide-number">4</div>
+    </div>
+
+    <!-- Slide 5: Encoder 设计 — CAD 侧 -->
+    <div class="slide" style="background: var(--color-warm);">
+      <h1 class="anim-up">Encoder 设计 — CAD 侧</h1>
+      <div class="grid-2" style="margin-top: 1rem;">
+        <div class="card anim-up stagger-1" style="border-top: 4px solid var(--accent-blue);">
+          <h3>B-Rep Transformer（主路径）</h3>
+          <table style="margin-top: 0.6rem; font-size: 0.85rem;">
+            <tr><td style="font-weight:600; width:35%;">架构</td><td>6 层 Transformer，dim 512，8 heads</td></tr>
+            <tr><td style="font-weight:600;">输入</td><td>B-Rep 序列化 token（face-edge 交替）</td></tr>
+            <tr><td style="font-weight:600;">位置编码</td><td>拓扑感知 PE（邻接矩阵相对偏置）</td></tr>
+            <tr><td style="font-weight:600;">序列上限</td><td>256 tokens</td></tr>
+            <tr><td style="font-weight:600;">输出</td><td>[CLS] → projection → 512 维</td></tr>
+          </table>
+          <p style="margin-top: 0.8rem; font-size: 0.85rem; color: var(--accent-blue);"><strong>为什么选 Transformer 而非 GNN？</strong></p>
+          <ul style="font-size: 0.82rem;">
+            <li>与 CLIP 文本塔架构对称，训练对齐自然</li>
+            <li>固定长度序列易 batch 化，GPU 利用率高</li>
+            <li>全局注意力捕获长距离拓扑依赖</li>
+            <li>复用 TensorRT Transformer 优化栈</li>
+          </ul>
+        </div>
+        <div class="card anim-up stagger-2" style="border-top: 4px solid var(--accent-mint);">
+          <h3>多视图 ViT（辅助路径）</h3>
+          <table style="margin-top: 0.6rem; font-size: 0.85rem;">
+            <tr><td style="font-weight:600; width:35%;">架构</td><td>CLIP ViT-B/16，冻结主体</td></tr>
+            <tr><td style="font-weight:600;">输入</td><td>6 标准视角渲染图 224×224</td></tr>
+            <tr><td style="font-weight:600;">训练</td><td>只训练最后 2 层 + projection</td></tr>
+            <tr><td style="font-weight:600;">聚合</td><td>6 图 mean pooling → 512 维</td></tr>
+            <tr><td style="font-weight:600;">作用</td><td>补充视觉外观语义</td></tr>
+          </table>
+          <div style="margin-top: 1rem; padding: 0.8rem; background: rgba(5,150,105,0.08); border-radius: 6px;">
+            <p style="font-size: 0.85rem;"><strong>融合公式：</strong></p>
+            <code style="font-size: 0.9rem;">CAD_vec = 0.7 × brep_emb + 0.3 × mv_emb</code>
+            <p style="font-size: 0.8rem; margin-top: 0.4rem; opacity: 0.7;">α 可学习，初始化偏向 B-Rep 拓扑信息</p>
+          </div>
+        </div>
+      </div>
+      <div class="slide-number">5</div>
+    </div>
+
+    <!-- Slide 6: Encoder 设计 — Query 侧 -->
+    <div class="slide" style="background: var(--color-mint);">
+      <h1 class="anim-up">Encoder 设计 — Query 侧</h1>
+      <div class="grid-3" style="margin-top: 1rem;">
+        <div class="card anim-up stagger-1" style="border-top: 4px solid var(--accent-warm);">
+          <h3 style="font-size: 1rem;">Text Encoder</h3>
+          <ul style="font-size: 0.82rem; margin-top: 0.5rem;">
+            <li>Long-CLIP 文本塔（248 token）</li>
+            <li>12 层 Causal Transformer</li>
+            <li>冻结 + LoRA rank=16</li>
+            <li>[EoT] → projection → 512 维</li>
+            <li>推理版: TinyBERT-4L 蒸馏</li>
+          </ul>
+          <p style="font-size: 0.78rem; margin-top: 0.6rem; color: var(--accent-warm);">解决 77 token 限制，CAD 描述需要长文本</p>
+        </div>
+        <div class="card anim-up stagger-2" style="border-top: 4px solid var(--accent-blue);">
+          <h3 style="font-size: 1rem;">Image Encoder</h3>
+          <ul style="font-size: 0.82rem; margin-top: 0.5rem;">
+            <li>CLIP ViT-B/16</li>
+            <li>全量 fine-tune</li>
+            <li>输入: 224×224 单张图</li>
+            <li>[CLS] → projection → 512 维</li>
+            <li>统一处理三种图示类型</li>
+          </ul>
+          <p style="font-size: 0.78rem; margin-top: 0.6rem; color: var(--accent-blue);">草图 / 工程图 / 渲染截图一个模型通吃</p>
+        </div>
+        <div class="card anim-up stagger-3" style="border-top: 4px solid var(--accent-pink);">
+          <h3 style="font-size: 1rem;">Cross-Attention 融合</h3>
+          <ul style="font-size: 0.82rem; margin-top: 0.5rem;">
+            <li>2 层 Cross-Attn + 1 层 Self-Attn</li>
+            <li>Text tokens 为 Q</li>
+            <li>Image tokens 为 K, V</li>
+            <li>融合 [CLS] → 512 维 query</li>
+            <li>单模态时完全跳过</li>
+          </ul>
+          <p style="font-size: 0.78rem; margin-top: 0.6rem; color: var(--accent-pink);">文本约束图示："这个形状，但要圆孔"</p>
+        </div>
+      </div>
+      <div class="slide-number">6</div>
+    </div>
+
+    <!-- Slide 7: 训练策略 -->
+    <div class="slide" style="background: var(--color-blue);">
+      <h1 class="anim-up">训练策略 — 四阶段流程</h1>
+      <div style="display: flex; gap: 1rem; margin-top: 1.2rem; flex-wrap: wrap;">
+        <div class="card anim-up stagger-1" style="flex: 1; min-width: 200px; border-left: 4px solid var(--accent-blue);">
+          <h3 style="font-size: 0.9rem; color: var(--accent-blue);">Phase 1</h3>
+          <p style="font-size: 0.85rem; font-weight: 600;">基础对齐 (3-5天)</p>
+          <ul style="font-size: 0.78rem; margin-top: 0.4rem;">
+            <li>CAD ↔ Text InfoNCE 双向对比</li>
+            <li>Batch 2048 (gradient cache)</li>
+            <li>τ 可学习，初始 0.07</li>
+            <li>Text 冻结+LoRA / B-Rep 全量</li>
+          </ul>
+        </div>
+        <div class="card anim-up stagger-2" style="flex: 1; min-width: 200px; border-left: 4px solid var(--accent-mint);">
+          <h3 style="font-size: 0.9rem; color: var(--accent-mint);">Phase 2</h3>
+          <p style="font-size: 0.85rem; font-weight: 600;">图示对齐 (1-2天)</p>
+          <ul style="font-size: 0.78rem; margin-top: 0.4rem;">
+            <li>Image → CAD 对比损失</li>
+            <li>复用 Phase 1 CAD embedding</li>
+            <li>渲染图 + 工程图 + 合成草图</li>
+            <li>Image Encoder 全量 fine-tune</li>
+          </ul>
+        </div>
+        <div class="card anim-up stagger-3" style="flex: 1; min-width: 200px; border-left: 4px solid var(--accent-pink);">
+          <h3 style="font-size: 0.9rem; color: var(--accent-pink);">Phase 3</h3>
+          <p style="font-size: 0.85rem; font-weight: 600;">融合训练 (1天)</p>
+          <ul style="font-size: 0.78rem; margin-top: 0.4rem;">
+            <li>Cross-Attn 融合层训练</li>
+            <li>三元组 (text, sketch, CAD)</li>
+            <li>联合 loss 防单模态退化</li>
+            <li>验证: 融合 > 单模态</li>
+          </ul>
+        </div>
+        <div class="card anim-up stagger-4" style="flex: 1; min-width: 200px; border-left: 4px solid var(--accent-warm);">
+          <h3 style="font-size: 0.9rem; color: var(--accent-warm);">Phase 4</h3>
+          <p style="font-size: 0.85rem; font-weight: 600;">知识蒸馏 (0.5天)</p>
+          <ul style="font-size: 0.78rem; margin-top: 0.4rem;">
+            <li>Teacher: 12 层 → Student: 4 层</li>
+            <li>中间层对齐 + embedding MSE</li>
+            <li>门槛: Recall@10 下降 ≤2%</li>
+            <li>否则回退 6 层</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card anim-up stagger-5" style="margin-top: 1rem; background: rgba(37,99,235,0.05);">
+        <h3 style="font-size: 0.9rem;">Hard Negative Mining（精度提升关键手段）</h3>
+        <p style="font-size: 0.82rem; margin-top: 0.3rem;">每 epoch 用当前模型检索 Top-50，取 rank 10-30 作为下轮 hard negative。挖掘两类：几何相似但语义不同（M6 vs M8 螺栓）、语义相似但几何不同（焊接法兰 vs 螺栓法兰）</p>
+      </div>
+      <div class="slide-number">7</div>
+    </div>
+
+    <!-- Slide 8: 数据管线 -->
+    <div class="slide" style="background: var(--color-pink);">
+      <h1 class="anim-up">数据管线</h1>
+      <div class="grid-2" style="margin-top: 1rem;">
+        <div class="anim-up stagger-1">
+          <h3>数据准备流水线</h3>
+          <pre style="font-size: 0.78em; margin-top: 0.6rem; background: rgba(219,39,119,0.04);">
+ABC Dataset (1M STEP)
+  → B-Rep 解析 → Token 序列化
+  → 6 视角渲染 (224×224)
+  → 三视图导出 (工程图)
+  → Edge detection + 扰动 → 合成草图
+  → LLM 生成文本 (5条/模型)
+
+Fusion 360 Gallery (8k)
+  → 同上 + 自带设计意图元数据</pre>
+          <div style="margin-top: 0.8rem; padding: 0.6rem; background: rgba(0,0,0,0.03); border-radius: 6px;">
+            <p style="font-size: 0.82rem;"><strong>数据规模：</strong>1M 零件 × 5 文本 = 5M 训练对</p>
+          </div>
+        </div>
+        <div class="anim-up stagger-2">
+          <h3>LLM 标注 — 五个粒度</h3>
+          <div style="margin-top: 0.6rem;">
+            <div class="card" style="margin-bottom: 0.5rem; padding: 0.6rem 1rem;">
+              <p style="font-size: 0.82rem;"><span class="tag" style="background:rgba(217,119,6,0.1);color:var(--accent-warm);">概括</span>"带法兰的圆柱管接头"</p>
+            </div>
+            <div class="card" style="margin-bottom: 0.5rem; padding: 0.6rem 1rem;">
+              <p style="font-size: 0.82rem;"><span class="tag" style="background:rgba(37,99,235,0.1);color:var(--accent-blue);">几何</span>"圆柱体主体，顶部 6 孔均布法兰盘"</p>
+            </div>
+            <div class="card" style="margin-bottom: 0.5rem; padding: 0.6rem 1rem;">
+              <p style="font-size: 0.82rem;"><span class="tag" style="background:rgba(5,150,105,0.1);color:var(--accent-mint);">功能</span>"管道系统连接件，承受中等压力"</p>
+            </div>
+            <div class="card" style="margin-bottom: 0.5rem; padding: 0.6rem 1rem;">
+              <p style="font-size: 0.82rem;"><span class="tag" style="background:rgba(219,39,119,0.1);color:var(--accent-pink);">工艺</span>"车削加工，法兰面铣削，螺纹滚压"</p>
+            </div>
+            <div class="card" style="padding: 0.6rem 1rem;">
+              <p style="font-size: 0.82rem;"><span class="tag" style="background:rgba(0,0,0,0.06);color:var(--text-dark);">组合</span>混合以上要素的自然语言段落</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="slide-number">8</div>
+    </div>
+
+    <!-- Slide 9: 性能目标 -->
+    <div class="slide" style="background: var(--color-warm);">
+      <h1 class="anim-up">性能目标</h1>
+      <div class="grid-2" style="margin-top: 1rem;">
+        <div class="anim-up stagger-1">
+          <h3>硬约束</h3>
+          <table style="margin-top: 0.6rem;">
+            <tr><td style="font-weight:600;">端到端延迟</td><td><span style="color:var(--accent-warm); font-weight:700;">&lt;10ms</span> (P99)</td></tr>
+            <tr><td style="font-weight:600;">数据库规模</td><td>1M CAD 零件</td></tr>
+            <tr><td style="font-weight:600;">部署硬件</td><td>RTX 5090 单卡 (32GB)</td></tr>
+            <tr><td style="font-weight:600;">显存占用</td><td>&lt;4GB（余量留给扩展）</td></tr>
+            <tr><td style="font-weight:600;">QPS (batch=1)</td><td>&gt;100</td></tr>
+            <tr><td style="font-weight:600;">QPS (batch=32)</td><td>&gt;1000</td></tr>
+          </table>
+        </div>
+        <div class="anim-up stagger-2">
+          <h3>优化后各场景延迟</h3>
+          <div class="css-chart" style="margin-top: 0.6rem;">
+            <div class="css-bar" style="--value: 8%;" data-label="纯文本 Query" data-value="~0.8ms">
+              <style>.slide:nth-child(9) .css-bar:nth-child(1)::before { background: var(--accent-warm); }</style>
+            </div>
+            <div class="css-bar" style="--value: 25%;" data-label="纯图示 Query" data-value="~2.5ms">
+              <style>.slide:nth-child(9) .css-bar:nth-child(2)::before { background: var(--accent-blue); }</style>
+            </div>
+            <div class="css-bar" style="--value: 30%;" data-label="双模态 Query" data-value="~3.0ms">
+              <style>.slide:nth-child(9) .css-bar:nth-child(3)::before { background: var(--accent-pink); }</style>
+            </div>
+            <div class="css-bar" style="--value: 100%;" data-label="硬约束上限" data-value="10ms">
+              <style>.slide:nth-child(9) .css-bar:nth-child(4)::before { background: rgba(0,0,0,0.15); }</style>
+            </div>
+          </div>
+          <p style="font-size: 0.82rem; margin-top: 0.6rem; color: var(--accent-mint); font-weight: 600;">最严格场景仍有 7ms 余量</p>
+        </div>
+      </div>
+      <div class="card anim-up stagger-3" style="margin-top: 1rem; background: rgba(217,119,6,0.05);">
+        <h3 style="font-size: 0.9rem;">显存预算 — 总计 ~3.3GB / 32GB</h3>
+        <div style="display: flex; gap: 1.5rem; margin-top: 0.4rem; flex-wrap: wrap; font-size: 0.82rem;">
+          <span>Text Encoder (INT8): ~30MB</span>
+          <span>Image Encoder (FP16): ~170MB</span>
+          <span>Cross-Attn (FP16): ~50MB</span>
+          <span>FAISS Index (1M×512): ~2GB</span>
+          <span>Workspace: ~1GB</span>
+        </div>
+      </div>
+      <div class="slide-number">9</div>
+    </div>
+
+    <!-- Slide 10: 优化路线 40ms→3ms -->
+    <div class="slide" style="background: var(--color-mint);">
+      <h1 class="anim-up">优化路线 — 40ms → 3ms</h1>
+      <h2 class="anim-up stagger-1" style="font-size: 1rem; opacity: 0.7;">未优化 baseline 超标 4×，通过四层优化压缩到目标内</h2>
+      <div style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.6rem;">
+        <div class="card anim-up stagger-1" style="display: flex; align-items: center; gap: 1rem; padding: 0.8rem 1.2rem; border-left: 4px solid #ef4444;">
+          <div style="min-width: 60px; text-align: center;"><span class="big-number" style="font-size: 1.8rem; color: #ef4444;">40ms</span></div>
+          <div><p style="font-size: 0.85rem; font-weight: 600;">PyTorch FP32 Baseline</p><p style="font-size: 0.78rem; opacity: 0.7;">Text 15ms + Image 12ms + CrossAttn 4ms + FAISS CPU 5ms + 其他 4ms</p></div>
+        </div>
+        <div class="card anim-up stagger-2" style="display: flex; align-items: center; gap: 1rem; padding: 0.8rem 1.2rem; border-left: 4px solid var(--accent-warm);">
+          <div style="min-width: 60px; text-align: center;"><span class="big-number" style="font-size: 1.8rem; color: var(--accent-warm);">~8ms</span></div>
+          <div><p style="font-size: 0.85rem; font-weight: 600;">Level 1: 模型蒸馏</p><p style="font-size: 0.78rem; opacity: 0.7;">Text Encoder 12L → TinyBERT 4L = 7.5× 加速（15ms → 2ms）</p></div>
+        </div>
+        <div class="card anim-up stagger-3" style="display: flex; align-items: center; gap: 1rem; padding: 0.8rem 1.2rem; border-left: 4px solid var(--accent-blue);">
+          <div style="min-width: 60px; text-align: center;"><span class="big-number" style="font-size: 1.8rem; color: var(--accent-blue);">~4ms</span></div>
+          <div><p style="font-size: 0.85rem; font-weight: 600;">Level 2: TensorRT 编译</p><p style="font-size: 0.78rem; opacity: 0.7;">层融合 + FP16/INT8 量化，所有模型 3-5× 加速</p></div>
+        </div>
+        <div class="card anim-up stagger-4" style="display: flex; align-items: center; gap: 1rem; padding: 0.8rem 1.2rem; border-left: 4px solid var(--accent-mint);">
+          <div style="min-width: 60px; text-align: center;"><span class="big-number" style="font-size: 1.8rem; color: var(--accent-mint);">~3.5ms</span></div>
+          <div><p style="font-size: 0.85rem; font-weight: 600;">Level 3: FAISS GPU</p><p style="font-size: 0.78rem; opacity: 0.7;">CPU → GPU 迁移 = 10× 检索加速（5ms → 0.3ms）</p></div>
+        </div>
+        <div class="card anim-up stagger-5" style="display: flex; align-items: center; gap: 1rem; padding: 0.8rem 1.2rem; border-left: 4px solid var(--accent-pink);">
+          <div style="min-width: 60px; text-align: center;"><span class="big-number" style="font-size: 1.8rem; color: var(--accent-pink);">~3ms</span></div>
+          <div><p style="font-size: 0.85rem; font-weight: 600;">Level 4: 并行 + 缓存</p><p style="font-size: 0.78rem; opacity: 0.7;">CUDA Stream 并行 Text∥Image（取 max 非 sum）+ LRU 缓存热点查询</p></div>
+        </div>
+      </div>
+      <div class="slide-number">10</div>
+    </div>
+
+    <!-- Slide 11: 5090 Blackwell 特有能力 -->
+    <div class="slide" style="background: var(--color-blue);">
+      <h1 class="anim-up">RTX 5090 Blackwell 特有能力</h1>
+      <h2 class="anim-up stagger-1" style="font-size: 1rem; opacity: 0.7;">超越通用 GPU 优化的硬件专属加速</h2>
+      <div class="grid-3" style="margin-top: 1.2rem;">
+        <div class="card anim-up stagger-2" style="border-top: 4px solid var(--accent-blue); text-align: center;">
+          <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">⚡</div>
+          <h3 style="font-size: 1rem;">FP8 Tensor Core</h3>
+          <p style="font-size: 0.82rem; margin-top: 0.5rem;">Blackwell 原生 FP8 推理</p>
+          <ul style="font-size: 0.78rem; margin-top: 0.5rem; text-align: left;">
+            <li>比 INT8 精度更高（指数位保留）</li>
+            <li>速度与 INT8 相当</li>
+            <li>TensorRT 9.x 原生支持</li>
+            <li>优先于 INT8 使用</li>
+          </ul>
+        </div>
+        <div class="card anim-up stagger-3" style="border-top: 4px solid var(--accent-mint); text-align: center;">
+          <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🧩</div>
+          <h3 style="font-size: 1rem;">Sparsity 2:4</h3>
+          <p style="font-size: 0.82rem; margin-top: 0.5rem;">结构化稀疏加速</p>
+          <ul style="font-size: 0.78rem; margin-top: 0.5rem; text-align: left;">
+            <li>每 4 个权重保留 2 个非零</li>
+            <li>额外 ~1.5× 加速</li>
+            <li>需要稀疏感知训练</li>
+            <li>与 FP8 可叠加使用</li>
+          </ul>
+        </div>
+        <div class="card anim-up stagger-4" style="border-top: 4px solid var(--accent-pink); text-align: center;">
+          <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🔍</div>
+          <h3 style="font-size: 1rem;">CAGRA 图索引</h3>
+          <p style="font-size: 0.82rem; margin-top: 0.5rem;">FAISS 1.10 + cuVS</p>
+          <ul style="font-size: 0.78rem; margin-top: 0.5rem; text-align: left;">
+            <li>GPU 原生图索引算法</li>
+            <li>比 IVFFlat 快 3×</li>
+            <li>1M 规模 ~0.1ms</li>
+            <li>召回率 ~98%（vs IVFFlat 95%）</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card anim-up stagger-5" style="margin-top: 1rem; background: rgba(37,99,235,0.05);">
+        <p style="font-size: 0.85rem;"><strong>32GB VRAM 余量充足：</strong>模型 + 索引仅占 ~3.3GB，剩余 28.7GB 可用于更大索引、多模型并行、或未来扩展到 10M 规模</p>
+      </div>
+      <div class="slide-number">11</div>
+    </div>
+
+    <!-- Slide 12: 评估体系 -->
+    <div class="slide" style="background: var(--color-pink);">
+      <h1 class="anim-up">评估体系</h1>
+      <div class="grid-2" style="margin-top: 1rem;">
+        <div class="anim-up stagger-1">
+          <h3>核心指标</h3>
+          <table style="margin-top: 0.6rem;">
+            <thead><tr><th>指标</th><th>目标值</th><th>含义</th></tr></thead>
+            <tbody>
+              <tr><td>Recall@1</td><td style="font-weight:700; color:var(--accent-pink);">&gt;60%</td><td>Top-1 命中</td></tr>
+              <tr><td>Recall@10</td><td style="font-weight:700; color:var(--accent-pink);">&gt;90%</td><td>Top-10 包含正确结果</td></tr>
+              <tr><td>MRR</td><td style="font-weight:700; color:var(--accent-pink);">&gt;0.7</td><td>平均倒数排名</td></tr>
+              <tr><td>P99 延迟</td><td style="font-weight:700; color:var(--accent-pink);">&lt;10ms</td><td>99 分位端到端</td></tr>
+              <tr><td>QPS (single)</td><td style="font-weight:700; color:var(--accent-pink);">&gt;100</td><td>单条吞吐</td></tr>
+              <tr><td>QPS (batch)</td><td style="font-weight:700; color:var(--accent-pink);">&gt;1000</td><td>批量吞吐</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="anim-up stagger-2">
+          <h3>消融实验矩阵</h3>
+          <div style="margin-top: 0.6rem;">
+            <div class="card" style="margin-bottom: 0.5rem; padding: 0.7rem 1rem; border-left: 3px solid var(--accent-blue);">
+              <p style="font-size: 0.82rem; font-weight: 600;">CAD Encoder 消融</p>
+              <p style="font-size: 0.78rem; opacity: 0.7;">B-Rep only vs 多视图 only vs 双路融合</p>
+            </div>
+            <div class="card" style="margin-bottom: 0.5rem; padding: 0.7rem 1rem; border-left: 3px solid var(--accent-mint);">
+              <p style="font-size: 0.82rem; font-weight: 600;">Query 融合消融</p>
+              <p style="font-size: 0.78rem; opacity: 0.7;">纯文本 vs 纯图示 vs Cross-Attention 融合</p>
+            </div>
+            <div class="card" style="margin-bottom: 0.5rem; padding: 0.7rem 1rem; border-left: 3px solid var(--accent-warm);">
+              <p style="font-size: 0.82rem; font-weight: 600;">蒸馏精度消融</p>
+              <p style="font-size: 0.78rem; opacity: 0.7;">12 层 vs 6 层 vs 4 层 Text Encoder</p>
+            </div>
+            <div class="card" style="padding: 0.7rem 1rem; border-left: 3px solid var(--accent-pink);">
+              <p style="font-size: 0.82rem; font-weight: 600;">测试集构成</p>
+              <p style="font-size: 0.78rem; opacity: 0.7;">5000 零件测试库 + 500 条人工标注 query-CAD 配对</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="slide-number">12</div>
+    </div>
+
+    <!-- Slide 13: 风险与 Fallback -->
+    <div class="slide" style="background: var(--color-warm);">
+      <h1 class="anim-up">风险与 Fallback</h1>
+      <h2 class="anim-up stagger-1" style="font-size: 1rem; opacity: 0.7;">每个风险都有明确的退化路径，系统不会完全失效</h2>
+      <div style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem;">
+        <div class="card anim-up stagger-1" style="display: grid; grid-template-columns: 2fr 1fr 2.5fr; gap: 0.8rem; padding: 0.6rem 1rem; align-items: center;">
+          <p style="font-size: 0.82rem; font-weight: 600;">B-Rep Transformer 训练不稳定</p>
+          <p style="font-size: 0.78rem; color: #ef4444;">主路径失效</p>
+          <p style="font-size: 0.78rem; color: var(--accent-mint);">→ 多视图路径兜底，系统仍可用</p>
+        </div>
+        <div class="card anim-up stagger-2" style="display: grid; grid-template-columns: 2fr 1fr 2.5fr; gap: 0.8rem; padding: 0.6rem 1rem; align-items: center;">
+          <p style="font-size: 0.82rem; font-weight: 600;">Cross-Attention 延迟超标</p>
+          <p style="font-size: 0.78rem; color: #ef4444;">双模态超 10ms</p>
+          <p style="font-size: 0.78rem; color: var(--accent-mint);">→ 退化为 late fusion（加权平均）</p>
+        </div>
+        <div class="card anim-up stagger-3" style="display: grid; grid-template-columns: 2fr 1fr 2.5fr; gap: 0.8rem; padding: 0.6rem 1rem; align-items: center;">
+          <p style="font-size: 0.82rem; font-weight: 600;">ViT-B/16 延迟超标</p>
+          <p style="font-size: 0.78rem; color: #ef4444;">图示检索超标</p>
+          <p style="font-size: 0.78rem; color: var(--accent-mint);">→ 换 ViT-S/16 (22M) 或降分辨率</p>
+        </div>
+        <div class="card anim-up stagger-4" style="display: grid; grid-template-columns: 2fr 1fr 2.5fr; gap: 0.8rem; padding: 0.6rem 1rem; align-items: center;">
+          <p style="font-size: 0.82rem; font-weight: 600;">TinyBERT 精度损失过大</p>
+          <p style="font-size: 0.78rem; color: #ef4444;">Recall 下降 &gt;3%</p>
+          <p style="font-size: 0.78rem; color: var(--accent-mint);">→ 回退到 6 层蒸馏</p>
+        </div>
+        <div class="card anim-up stagger-5" style="display: grid; grid-template-columns: 2fr 1fr 2.5fr; gap: 0.8rem; padding: 0.6rem 1rem; align-items: center;">
+          <p style="font-size: 0.82rem; font-weight: 600;">5090 TensorRT FP8 不成熟</p>
+          <p style="font-size: 0.78rem; color: #ef4444;">编译失败</p>
+          <p style="font-size: 0.78rem; color: var(--accent-mint);">→ 回退 FP16 + INT8 组合</p>
+        </div>
+        <div class="card anim-up stagger-5" style="display: grid; grid-template-columns: 2fr 1fr 2.5fr; gap: 0.8rem; padding: 0.6rem 1rem; align-items: center;">
+          <p style="font-size: 0.82rem; font-weight: 600;">草图合成数据分布偏差</p>
+          <p style="font-size: 0.78rem; color: #ef4444;">草图检索差</p>
+          <p style="font-size: 0.78rem; color: var(--accent-mint);">→ 收集少量真实草图 fine-tune</p>
+        </div>
+      </div>
+      <div class="slide-number">13</div>
+    </div>
+
+    <!-- Slide 14: 技术选型总览 -->
+    <div class="slide" style="background: var(--color-mint);">
+      <h1 class="anim-up">技术选型总览</h1>
+      <table class="anim-up stagger-1" style="margin-top: 1.2rem;">
+        <thead>
+          <tr><th>层级</th><th>选型</th><th>理由</th></tr>
+        </thead>
+        <tbody>
+          <tr><td style="font-weight:600;">CAD 编码</td><td>B-Rep Transformer + 多视图 ViT</td><td>原生拓扑 + 视觉语义互补</td></tr>
+          <tr><td style="font-weight:600;">文本编码</td><td>Long-CLIP → TinyBERT-4L 蒸馏</td><td>长文本支持 + 极致推理速度</td></tr>
+          <tr><td style="font-weight:600;">图示编码</td><td>CLIP ViT-B/16 统一 encoder</td><td>一个模型覆盖三种图示</td></tr>
+          <tr><td style="font-weight:600;">跨模态融合</td><td>Cross-Attention (2CA+1SA)</td><td>文本约束图示的语义交互</td></tr>
+          <tr><td style="font-weight:600;">对比学习</td><td>InfoNCE + Hard Negative Mining</td><td>CLIP 范式 + 精度提升关键</td></tr>
+          <tr><td style="font-weight:600;">向量检索</td><td>FAISS 1.10 GPU (IVFFlat/CAGRA)</td><td>1M 规模 &lt;0.3ms</td></tr>
+          <tr><td style="font-weight:600;">推理引擎</td><td>TensorRT 9.x (FP8/INT8)</td><td>5090 原生支持，层融合最优</td></tr>
+          <tr><td style="font-weight:600;">服务框架</td><td>Triton Inference Server</td><td>TRT 集成 + dynamic batching</td></tr>
+          <tr><td style="font-weight:600;">文本预处理</td><td>HuggingFace tokenizers (Rust)</td><td>比 Python 快 10×</td></tr>
+          <tr><td style="font-weight:600;">图像预处理</td><td>torchvision CUDA ops</td><td>全 GPU 流水线，零 CPU 瓶颈</td></tr>
+        </tbody>
+      </table>
+      <div class="slide-number">14</div>
+    </div>
+
+  </div>
+  <script>
+    function initKeyboardNav() {
+      const slides = document.querySelectorAll('.slide');
+      let current = 0;
+      function showSlide(index) {
+        slides.forEach((s, i) => { s.classList.toggle('active', i === index); s.setAttribute('aria-hidden', i !== index); });
+        current = index;
+        window.dispatchEvent(new CustomEvent('slidechange', { detail: { index: current, total: slides.length } }));
+      }
+      document.addEventListener('keydown', (e) => {
+        switch (e.key) {
+          case 'ArrowRight': case 'ArrowDown': case ' ': e.preventDefault(); if (current < slides.length - 1) showSlide(current + 1); break;
+          case 'ArrowLeft': case 'ArrowUp': e.preventDefault(); if (current > 0) showSlide(current - 1); break;
+          case 'Home': e.preventDefault(); showSlide(0); break;
+          case 'End': e.preventDefault(); showSlide(slides.length - 1); break;
+        }
+      });
+      showSlide(0);
+      return { showSlide, getIndex: () => current, getTotal: () => slides.length };
+    }
+    function initTouchNav(nav) {
+      let startX = 0, startY = 0; const threshold = 50;
+      document.addEventListener('touchstart', (e) => { startX = e.touches[0].clientX; startY = e.touches[0].clientY; }, { passive: true });
+      document.addEventListener('touchend', (e) => {
+        const dx = e.changedTouches[0].clientX - startX, dy = e.changedTouches[0].clientY - startY;
+        if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) return;
+        if (Math.abs(dx) > Math.abs(dy)) { if (dx < 0 && nav.getIndex() < nav.getTotal() - 1) nav.showSlide(nav.getIndex() + 1); if (dx > 0 && nav.getIndex() > 0) nav.showSlide(nav.getIndex() - 1); }
+      }, { passive: true });
+    }
+    function initProgressBar() {
+      const bar = document.getElementById('progress-bar');
+      if (!bar) return;
+      window.addEventListener('slidechange', (e) => { const { index, total } = e.detail; bar.style.width = ((index + 1) / total * 100) + '%'; });
+    }
+    function initOverview(nav) {
+      let active = false;
+      const container = document.createElement('div');
+      container.id = 'overview-grid';
+      container.style.cssText = 'display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.85);padding:2rem;overflow:auto;';
+      document.body.appendChild(container);
+      function show() {
+        container.innerHTML = '';
+        document.querySelectorAll('.slide').forEach((slide, i) => {
+          const thumb = document.createElement('div');
+          thumb.style.cssText = 'display:inline-block;width:240px;height:135px;margin:8px;border:2px solid ' + (i === nav.getIndex() ? '#2563EB' : '#ccc') + ';border-radius:6px;overflow:hidden;cursor:pointer;position:relative;background:#fff;';
+          thumb.innerHTML = '<div style="transform:scale(0.2);transform-origin:top left;width:500%;height:500%;pointer-events:none;">' + slide.outerHTML + '</div><div style="position:absolute;bottom:4px;right:8px;color:#666;font-size:12px;">' + (i + 1) + '</div>';
+          thumb.addEventListener('click', () => { nav.showSlide(i); hide(); });
+          container.appendChild(thumb);
+        });
+        container.style.display = 'flex'; container.style.flexWrap = 'wrap'; container.style.justifyContent = 'center'; container.style.alignContent = 'start';
+        active = true;
+      }
+      function hide() { container.style.display = 'none'; active = false; }
+      document.addEventListener('keydown', (e) => { if (e.key === 'o' || e.key === 'O') { active ? hide() : show(); } if (e.key === 'Escape' && active) hide(); });
+    }
+    function initCounters() {
+      document.querySelectorAll('[data-counter]').forEach(function(el) {
+        var target = parseFloat(el.dataset.counter), duration = parseInt(el.dataset.duration) || 1500;
+        var prefix = el.dataset.prefix || '', suffix = el.dataset.suffix || '';
+        var decimals = (target % 1 !== 0) ? (target.toString().split('.')[1] || '').length : 0;
+        var slide = el.closest('.slide'), animated = false;
+        function animate() { if (animated) return; animated = true; var start = performance.now(); function tick(now) { var progress = Math.min((now - start) / duration, 1); var eased = 1 - Math.pow(1 - progress, 3); el.textContent = prefix + (target * eased).toFixed(decimals) + suffix; if (progress < 1) requestAnimationFrame(tick); } requestAnimationFrame(tick); }
+        if (slide) { window.addEventListener('slidechange', function() { if (slide.classList.contains('active')) animate(); }); } else { animate(); }
+      });
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+      const nav = initKeyboardNav();
+      initTouchNav(nav);
+      initProgressBar();
+      initOverview(nav);
+      initCounters();
+    });
+  </script>
+</body>
+</html>
