@@ -29,7 +29,9 @@ _config: Config | None = None
 def get_config() -> Config:
     global _config
     if _config is None:
-        _config = Config()
+        import os
+        data_root = os.environ.get("CAD_DATA_ROOT", "data")
+        _config = Config(data_root=Path(data_root))
     return _config
 
 
