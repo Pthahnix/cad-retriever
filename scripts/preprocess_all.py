@@ -48,8 +48,14 @@ while True:
     print(f"Edges: {edges_done} / Renders: {renders_done}")
 
     if renders_done > 0 and edges_done >= renders_done * 0.99:
-        print("Preprocessing complete!")
-        break
+        # Only exit if rendering is also substantially complete (>95% of all STEP files)
+        step_total = sum(1 for _ in Path("/home/cc/data/abc_step/step").rglob("*.step"))
+        if renders_done >= step_total * 0.95:
+            print("Preprocessing complete!")
+            break
+        else:
+            print(f"Caught up with renders ({edges_done}/{renders_done}), waiting for more renders ({renders_done}/{step_total} STEP files rendered)...")
+            time.sleep(60)
 
     if not pending:
         # No new models yet, wait for renderer
