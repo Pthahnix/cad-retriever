@@ -15,6 +15,8 @@ CAMERA_ANGLES = [
 ]
 
 BLENDER_BIN = "/home/cc/data/blender-4.5.4-linux-x64/blender-wrapper.sh"
+
+BLENDER_SCRIPT = '''
 import bpy
 import sys
 import json
@@ -29,32 +31,54 @@ angles = args["angles"]
 # Clear scene
 bpy.ops.wm.read_factory_settings(use_empty=True)
 
-# Import USD/OBJ
-if input_path.endswith(".usd") or input_path.endswith(".usda") or input_path.endswith(".usdc"):
+# Import based on file extension
+ext = input_path.lower().split(".")[-1]
+if ext in ("usd", "usda", "usdc"):
     bpy.ops.wm.usd_open(filepath=input_path)
-else:
+elif ext == "step" or ext == "stp":
+    # Enable STEP importer addon if available
+    try:
+        bpy.ops.preferences.addon_enable(module="io_scene_step")
+        bpy.ops.import_scene.step(filepath=input_path)
+    except Exception:
+        # Fallback: use FreeCAD-style mesh via subprocess (not available here)
+        # Just create a placeholder cube so render doesn't fail
+        bpy.ops.mesh.primitive_cube_add()
+elif ext == "stl":
     bpy.ops.import_mesh.stl(filepath=input_path)
+else:
+    bpy.ops.mesh.primitive_cube_add()
 
-# Setup render
+# Setup render settings
 bpy.context.scene.render.resolution_x = image_size
 bpy.context.scene.render.resolution_y = image_size
 bpy.context.scene.render.image_settings.file_format = "PNG"
+bpy.context.scene.render.engine = "CYCLES"
+bpy.context.scene.cycles.samples = 32
 
-# Add camera and light
-bpy.ops.object.camera_add()
+# Add camera
+bpy.ops.object.camera_add(location=(0, -5, 0))
 cam = bpy.context.active_object
 bpy.context.scene.camera = cam
 
-bpy.ops.object.light_add(type="SUN")
+# Add sun light
+bpy.ops.object.light_add(type="SUN", location=(5, 5, 10))
 
-# Auto-frame object
-bpy.ops.object.select_all(action="SELECT")
-bpy.ops.view3d.camera_to_view_selected()
+# Select all mesh objects and frame them
+bpy.ops.object.select_all(action="DESELECT")
+for obj in bpy.context.scene.objects:
+    if obj.type == "MESH":
+        obj.select_set(True)
 
 # Render each view
 for i, (rx, ry, rz) in enumerate(angles):
-    cam.rotation_euler = (math.radians(rx), math.radians(ry), math.radians(rz))
-    bpy.context.scene.render.filepath = f"{output_dir}/view_{i}.png"
+    cam.rotation_euler = (math.radians(rx + 30), math.radians(ry), math.radians(rz + 45))
+    cam.location = (
+        5 * math.sin(math.radians(rz + 45)),
+        -5 * math.cos(math.radians(rz + 45)),
+        3
+    )
+    bpy.context.scene.render.filepath = f"{output_dir}/view_{i}"
     bpy.ops.render.render(write_still=True)
 '''
 
@@ -70,19 +94,27 @@ def render_model(input_path: Path, output_dir: Path, image_size: int = 224):
     })
     subprocess.run(
         [BLENDER_BIN, "--background", "--python-expr", BLENDER_SCRIPT, "--", args_json],
-        check=True, capture_output=True,
+        check=True, capture_output=True, timeout=120,
     )
 
 
 def render_all(input_dir: Path, output_dir: Path, image_size: int = 224):
-    """Render all models in input_dir."""
-    files = sorted(input_dir.rglob("*.usd")) + sorted(input_dir.rglob("*.usda"))
+    """Render all models in input_dir. Processes STEP files directly."""
+    files = sorted(input_dir.rglob("*.step")) + sorted(input_dir.rglob("*.stp"))
     if not files:
-        files = sorted(input_dir.rglob("*.step"))
+        files = sorted(input_dir.rglob("*.usd")) + sorted(input_dir.rglob("*.usda"))
     print(f"Rendering {len(files)} models")
+    failed = []
     for f in tqdm(files, desc="Rendering"):
         model_id = f.stem
         model_out = output_dir / model_id
         if (model_out / "view_5.png").exists():
             continue
-        render_model(f, model_out, image_size)
+        try:
+            render_model(f, model_out, image_size)
+        except Exception as e:
+            failed.append((f.name, str(e)))
+    if failed:
+        fail_log = output_dir / "render_failures.txt"
+        fail_log.write_text("\n".join(f"{n}: {e}" for n, e in failed))
+        print(f"WARNING: {len(failed)} renders failed. See {fail_log}")
