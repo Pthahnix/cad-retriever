@@ -67,15 +67,25 @@ def main():
               f"Index:{index_exists} | SketchEnc:{sketch_enc}",
               flush=True)
 
-        # Start preprocess when enough renders are done (or rendering is complete)
-        if rendered >= 50000 and not preprocess_started and not is_running("preprocess_all"):
-            print("Starting preprocess (edge detection + sketch synthesis)...", flush=True)
+        # Auto-restart render_all if it died and rendering isn't complete
+        if rendered < step_files * 0.99 and not is_running("render_all"):
+            print("render_all died — restarting...", flush=True)
+            pid = run_bg([PYTHON, f"{SCRIPTS}/render_all.py",
+                          "--input", str(STEP_DIR),
+                          "--output", str(RENDERS_DIR),
+                          "--workers", "24"],
+                         DATA_ROOT / "render.log")
+            print(f"Render restarted PID: {pid}", flush=True)
+
+        # Auto-restart preprocess if it died and there are unprocessed renders
+        if rendered > 1000 and edges < rendered * 0.95 and not is_running("preprocess_all"):
+            print("preprocess_all died — restarting...", flush=True)
             pid = run_bg([PYTHON, f"{SCRIPTS}/preprocess_all.py",
                           "--renders", str(RENDERS_DIR),
                           "--edges-out", str(EDGES_DIR),
                           "--sketches-out", str(SKETCHES_DIR)],
                          DATA_ROOT / "preprocess.log")
-            print(f"Preprocess PID: {pid}", flush=True)
+            print(f"Preprocess restarted PID: {pid}", flush=True)
             preprocess_started = True
 
         # Start Phase 1 training when rendering is substantially done
