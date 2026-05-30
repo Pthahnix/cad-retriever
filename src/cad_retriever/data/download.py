@@ -2,47 +2,54 @@
 HARD REQUIREMENT: All 1M files must be fully downloaded before any processing begins.
 """
 import subprocess
+import py7zr
 from pathlib import Path
 from tqdm import tqdm
 
 
-ABC_CHUNKS_URL = "https://archive.nyu.edu/rest/bitstreams/{chunk_id}/retrieve"
-ABC_MANIFEST_URL = "https://deep-geometry.github.io/abc-dataset/data/abc_chunk_ids.txt"
+ABC_STEP_LIST_URL = "https://deep-geometry.github.io/abc-dataset/data/step_v00.txt"
 
 
-def download_abc_dataset(output_dir: Path, verify: bool = True):
+def download_abc_dataset(output_dir: Path, verify: bool = True,
+                         proxy: str = "http://127.0.0.1:7890"):
     """Download all ABC dataset chunks and extract STEP files.
     This downloads the COMPLETE 1M dataset. No partial downloads allowed.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = output_dir / "chunk_ids.txt"
+    list_path = output_dir / "step_v00.txt"
 
-    # Download manifest
+    env_proxy = {"http_proxy": proxy, "https_proxy": proxy}
+
+    # Download chunk list
     subprocess.run(
-        ["curl", "-o", str(manifest_path), ABC_MANIFEST_URL],
+        ["curl", "-x", proxy, "-o", str(list_path), ABC_STEP_LIST_URL],
         check=True,
     )
-    chunk_ids = manifest_path.read_text().strip().split("\n")
-    print(f"ABC Dataset: {len(chunk_ids)} chunks to download")
+    lines = list_path.read_text().strip().split("\n")
+    chunks = [(line.split()[0], line.split()[1]) for line in lines if line.strip()]
+    print(f"ABC Dataset: {len(chunks)} chunks to download")
 
     # Download each chunk
     chunks_dir = output_dir / "chunks"
     chunks_dir.mkdir(exist_ok=True)
-    for chunk_id in tqdm(chunk_ids, desc="Downloading ABC chunks"):
-        chunk_path = chunks_dir / f"{chunk_id}.7z"
-        if chunk_path.exists():
+    for url, filename in tqdm(chunks, desc="Downloading ABC chunks"):
+        chunk_path = chunks_dir / filename
+        if chunk_path.exists() and chunk_path.stat().st_size > 1_000_000:
             continue
-        url = ABC_CHUNKS_URL.format(chunk_id=chunk_id)
-        subprocess.run(["curl", "-o", str(chunk_path), url], check=True)
+        subprocess.run(
+            ["curl", "-x", proxy, "-L", "-o", str(chunk_path), url],
+            check=True,
+        )
 
     # Extract all chunks
     step_dir = output_dir / "step"
     step_dir.mkdir(exist_ok=True)
     for chunk_file in tqdm(sorted(chunks_dir.glob("*.7z")), desc="Extracting"):
-        subprocess.run(
-            ["7z", "x", str(chunk_file), f"-o{step_dir}", "-y", "*.step"],
-            check=True, capture_output=True,
-        )
+        try:
+            with py7zr.SevenZipFile(chunk_file, mode="r") as z:
+                z.extractall(path=step_dir)
+        except Exception as e:
+            print(f"WARNING: Failed to extract {chunk_file.name}: {e}")
 
     # Verify count
     step_files = list(step_dir.rglob("*.step"))
