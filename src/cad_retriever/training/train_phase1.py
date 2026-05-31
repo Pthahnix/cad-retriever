@@ -23,8 +23,9 @@ def train_phase1(config: Config, model_ids: list[str]):
         model_ids=model_ids,
         num_views=config.num_views,
     )
-    loader = DataLoader(dataset, batch_size=config.batch_size_phase1,
-                        shuffle=True, num_workers=8, pin_memory=True)
+    loader = DataLoader(dataset, batch_size=min(config.batch_size_phase1, 64),
+                        shuffle=True, num_workers=4, pin_memory=True,
+                        persistent_workers=True)
     scheduler = CosineAnnealingLR(optimizer, T_max=len(loader))
 
     encoder.train()
