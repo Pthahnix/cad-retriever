@@ -12,9 +12,12 @@ args = parser.parse_args()
 
 config = Config(data_root=args.data_root)
 
-# Use embedded_model_ids.txt if available (filtered to models with embeddings)
+# Use good_model_ids.txt (filtered to non-degenerate renders) if available
+good_ids_path = config.data_root / "good_model_ids.txt"
 embedded_ids_path = config.data_root / "embedded_model_ids.txt"
-if embedded_ids_path.exists():
+if good_ids_path.exists():
+    all_model_ids = good_ids_path.read_text().strip().split("\n")
+elif embedded_ids_path.exists():
     all_model_ids = embedded_ids_path.read_text().strip().split("\n")
 else:
     all_model_ids = (config.data_root / "model_ids.txt").read_text().strip().split("\n")

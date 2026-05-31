@@ -29,8 +29,11 @@ def evaluate(config: Config, test_model_ids: list[str], all_model_ids: list[str]
     faiss_index = load_faiss_index(config.index_path)
 
     # Build model_id → index mapping using the same list the FAISS index was built from
+    good_ids_path = config.data_root / "good_model_ids.txt"
     embedded_ids_path = config.data_root / "embedded_model_ids.txt"
-    if embedded_ids_path.exists():
+    if good_ids_path.exists():
+        index_model_ids = good_ids_path.read_text().strip().split("\n")
+    elif embedded_ids_path.exists():
         index_model_ids = embedded_ids_path.read_text().strip().split("\n")
     else:
         index_model_ids = all_model_ids
