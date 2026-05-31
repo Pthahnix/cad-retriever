@@ -82,3 +82,7 @@ def create_app(
         return SearchResponse(results=results)
 
     return app
+
+
+# Module-level app for uvicorn
+app = create_app()
