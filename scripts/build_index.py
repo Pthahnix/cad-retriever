@@ -11,9 +11,15 @@ parser.add_argument("--data-root", type=Path, default=Path("/home/cc/data"))
 args = parser.parse_args()
 
 config = Config(data_root=args.data_root)
-model_ids = (config.data_root / "model_ids.txt").read_text().strip().split("\n")
+all_model_ids = (config.data_root / "model_ids.txt").read_text().strip().split("\n")
+# Only load embeddings that actually exist
+model_ids = [mid for mid in all_model_ids
+             if (config.embeddings_dir / f"{mid}.npy").exists()]
+print(f"Loading {len(model_ids)}/{len(all_model_ids)} embeddings (filtered to existing)...")
 
-print(f"Loading {len(model_ids)} embeddings...")
+# Save filtered list for downstream use
+(config.data_root / "embedded_model_ids.txt").write_text("\n".join(model_ids))
+
 vectors = []
 for mid in tqdm(model_ids):
     vec = np.load(config.embeddings_dir / f"{mid}.npy")

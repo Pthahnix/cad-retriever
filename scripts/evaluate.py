@@ -11,7 +11,15 @@ parser.add_argument("--test-size", type=int, default=5000)
 args = parser.parse_args()
 
 config = Config(data_root=args.data_root)
-all_model_ids = (config.data_root / "model_ids.txt").read_text().strip().split("\n")
+
+# Use embedded_model_ids.txt if available (filtered to models with embeddings)
+embedded_ids_path = config.data_root / "embedded_model_ids.txt"
+if embedded_ids_path.exists():
+    all_model_ids = embedded_ids_path.read_text().strip().split("\n")
+else:
+    all_model_ids = (config.data_root / "model_ids.txt").read_text().strip().split("\n")
+    all_model_ids = [mid for mid in all_model_ids
+                     if (config.embeddings_dir / f"{mid}.npy").exists()]
 
 # Split: last N models as test set
 test_ids = all_model_ids[-args.test_size:]
