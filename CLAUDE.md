@@ -22,6 +22,12 @@ This includes:
 - `/tmp/` (system disk)
 - Any path not under `/home/cc/data/`
 
+**System disk safety rules:**
+- Any script that creates temporary files (STL, OBJ, intermediate meshes) MUST use `tempfile` with a cleanup `finally` block, or write to `/home/cc/data/tmp/` instead of `/tmp/`.
+- The rendering pipeline previously leaked ~11GB of temp STL files into `/tmp/claude-1000/` and crashed the container. This MUST NOT happen again.
+- If system disk usage exceeds 80% (`df / | awk 'NR==2{print $5}' | tr -d '%'` > 80), STOP all processing and clean up before continuing.
+- Run `find /tmp -name '*.stl' -o -name '*.obj' -o -name '*.ply' | xargs rm -f` after any rendering/conversion batch.
+
 The `Config.data_root` MUST be set to `/home/cc/data` when running any script:
 ```bash
 python scripts/download_abc.py --output /home/cc/data/abc_step
@@ -98,7 +104,22 @@ python scripts/train.py --phase 2 --data-root /home/cc/data --epochs 10
 You MUST set up a recurring self-check every 30 minutes using Claude Code's built-in cron/scheduling capability. At the start of your session, create a cron that fires every 30 minutes with a prompt like:
 
 ```
-Self-check: Am I still making progress? Review what I've done in the last 30 minutes. If I'm stuck, diagnose and fix. If a long-running process is active (download, training, rendering), verify it's still running and report progress. If I've finished all code tasks but haven't started the data pipeline, START IT NOW. My job is not done until the full pipeline has run end-to-end and I have a working, deployed service.
+Self-check (30-min interval). Do ALL of the following:
+
+1. PROGRESS CHECK: Am I still making progress? Review what I've done in the last 30 minutes. If I'm stuck, diagnose and fix. If a long-running process is active (download, training, rendering), verify it's still running and report progress. If I've finished all code tasks but haven't started the data pipeline, START IT NOW.
+
+2. SYSTEM DISK SAFETY: Run `df -h /` and check usage. If above 80%, immediately:
+   - Delete temp files: `find /tmp -name '*.stl' -o -name '*.obj' -o -name '*.ply' | xargs rm -f`
+   - Clean Claude output files: `find /tmp/claude-* -name '*.output' -mmin +30 -delete`
+   - Check for any large files on system disk: `find / -xdev -size +100M -not -path '/root/miniconda3/*' 2>/dev/null`
+   - If still above 80% after cleanup, STOP all processing and investigate.
+
+3. GPU TASK CHECK: Run `nvidia-smi` and `ps aux | grep python | grep -v grep`.
+   - If a training/embedding job SHOULD be running but GPU utilization is 0%, the job has crashed. Check its log file for errors and restart or fix.
+   - If no GPU job is running and the pipeline is not complete, something is wrong — diagnose and resume.
+   - Expected GPU utilization during training: >80%. During embedding: >50%.
+
+My job is not done until the full pipeline has run end-to-end and I have a working, deployed service.
 ```
 
 **Your job is NOT done when code is written.** Your job is done when:
