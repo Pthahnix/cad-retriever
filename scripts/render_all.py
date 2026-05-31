@@ -1,20 +1,21 @@
 """
 Fast silhouette rendering pipeline for 1M CAD models.
 Uses OCP (STEP→mesh) + PIL (silhouette projection).
-Per-model timeout via multiprocessing.Process.join(timeout).
+SIGALRM timeout per model (works in Pool workers on Linux).
 """
 import argparse
 import os
 import math
-import sys
+import signal
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
-from multiprocessing import Pool, Process, Queue
+from multiprocessing import Pool
 from PIL import Image, ImageDraw
 
 
 VIEW_ANGLES = [(30,0),(30,60),(30,120),(30,180),(30,240),(30,300)]
+TIMEOUT_SECS = 10  # skip models that take longer than this
 
 
 def render_silhouette(verts, faces, elev_deg, azim_deg, size=224):
@@ -36,8 +37,18 @@ def render_silhouette(verts, faces, elev_deg, azim_deg, size=224):
     return img
 
 
-def _do_render(step_path, output_dir, image_size, result_q):
-    """Worker function — runs in a separate Process."""
+def render_model(args_tuple):
+    """Render one model with SIGALRM timeout."""
+    step_path, output_dir, image_size = args_tuple
+    output_dir = Path(output_dir)
+    if (output_dir / "view_5.png").exists():
+        return True
+
+    def _alarm(signum, frame):
+        raise TimeoutError()
+
+    old_handler = signal.signal(signal.SIGALRM, _alarm)
+    signal.alarm(TIMEOUT_SECS)
     try:
         from OCP.STEPControl import STEPControl_Reader
         from OCP.BRepMesh import BRepMesh_IncrementalMesh
@@ -46,7 +57,7 @@ def _do_render(step_path, output_dir, image_size, result_q):
 
         reader = STEPControl_Reader()
         if reader.ReadFile(str(step_path)) != 1:
-            result_q.put(False); return
+            return False
         reader.TransferRoots()
         shape = reader.OneShape()
         BRepMesh_IncrementalMesh(shape, 1.0).Perform()
@@ -58,38 +69,24 @@ def _do_render(step_path, output_dir, image_size, result_q):
         os.unlink(stl_path)
 
         if not hasattr(mesh, 'vertices') or len(mesh.vertices) == 0:
-            result_q.put(False); return
+            return False
 
         center = mesh.centroid
         scale = max(mesh.extents) if max(mesh.extents) > 0 else 1.0
         verts = (mesh.vertices - center) / scale
         faces = mesh.faces
 
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
         for i, (elev, azim) in enumerate(VIEW_ANGLES):
             img = render_silhouette(verts, faces, elev, azim, image_size)
-            img.save(Path(output_dir) / f"view_{i}.png")
-        result_q.put(True)
-    except Exception:
-        result_q.put(False)
-
-
-def render_model(args_tuple):
-    """Render one model with hard timeout via Process.join."""
-    step_path, output_dir, image_size = args_tuple
-    output_dir = Path(output_dir)
-    if (output_dir / "view_5.png").exists():
+            img.save(output_dir / f"view_{i}.png")
         return True
 
-    q = Queue()
-    p = Process(target=_do_render, args=(step_path, output_dir, image_size, q))
-    p.start()
-    p.join(timeout=10)  # 10s hard timeout — no subprocess overhead
-    if p.is_alive():
-        p.kill()
-        p.join()
+    except (TimeoutError, Exception):
         return False
-    return q.get() if not q.empty() else False
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
 
 
 def render_all_fast(input_dir: Path, output_dir: Path,
@@ -111,7 +108,8 @@ def render_all_fast(input_dir: Path, output_dir: Path,
         return
 
     failed = 0
-    with Pool(processes=workers, maxtasksperchild=100) as pool:
+    # maxtasksperchild recycles workers to prevent OCP memory leaks
+    with Pool(processes=workers, maxtasksperchild=200) as pool:
         with tqdm(total=len(tasks), desc="Rendering") as pbar:
             for result in pool.imap_unordered(render_model, tasks, chunksize=1):
                 if not result:
