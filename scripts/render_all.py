@@ -1,11 +1,12 @@
 """
 Fast silhouette rendering pipeline for 1M CAD models.
 Uses OCP (STEP→mesh) + PIL (silhouette projection).
-No GPU/EGL required. ~1s/model with warm workers.
+Hard per-model timeout via subprocess to handle complex STEP files.
 """
 import argparse
 import os
 import math
+import sys
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
@@ -35,63 +36,68 @@ def render_silhouette(verts, faces, elev_deg, azim_deg, size=224):
     return img
 
 
-def render_model(args_tuple):
-    step_path, output_dir, image_size = args_tuple
-    output_dir = Path(output_dir)
-    if (output_dir / "view_5.png").exists():
-        return True
-    output_dir.mkdir(parents=True, exist_ok=True)
+def _render_worker(step_path, output_dir, image_size):
+    """Called in a subprocess — renders one model and exits."""
     try:
-        import signal
+        from OCP.STEPControl import STEPControl_Reader
+        from OCP.BRepMesh import BRepMesh_IncrementalMesh
+        from OCP.StlAPI import StlAPI_Writer
+        import trimesh, tempfile
 
-        def _timeout_handler(signum, frame):
-            raise TimeoutError(f"Timeout processing {step_path}")
-
-        # 5s timeout per model — skip complex assemblies to maintain throughput
-        signal.signal(signal.SIGALRM, _timeout_handler)
-        signal.alarm(5)
-
-        try:
-            from OCP.STEPControl import STEPControl_Reader
-            from OCP.BRepMesh import BRepMesh_IncrementalMesh
-            import trimesh, tempfile
-
-            reader = STEPControl_Reader()
-            if reader.ReadFile(str(step_path)) != 1:
-                signal.alarm(0)
-                return False
-            reader.TransferRoots()
-            shape = reader.OneShape()
-            BRepMesh_IncrementalMesh(shape, 1.0).Perform()  # coarser mesh = faster
-        finally:
-            signal.alarm(0)
+        reader = STEPControl_Reader()
+        if reader.ReadFile(str(step_path)) != 1:
+            sys.exit(1)
+        reader.TransferRoots()
+        shape = reader.OneShape()
+        BRepMesh_IncrementalMesh(shape, 1.0).Perform()
 
         with tempfile.NamedTemporaryFile(suffix='.stl', delete=False) as f:
             stl_path = f.name
-        from OCP.StlAPI import StlAPI_Writer
         StlAPI_Writer().Write(shape, stl_path)
-
         mesh = trimesh.load(stl_path)
         os.unlink(stl_path)
 
         if not hasattr(mesh, 'vertices') or len(mesh.vertices) == 0:
-            return False
+            sys.exit(1)
 
         center = mesh.centroid
         scale = max(mesh.extents) if max(mesh.extents) > 0 else 1.0
         verts = (mesh.vertices - center) / scale
         faces = mesh.faces
 
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
         for i, (elev, azim) in enumerate(VIEW_ANGLES):
             img = render_silhouette(verts, faces, elev, azim, image_size)
-            img.save(output_dir / f"view_{i}.png")
+            img.save(Path(output_dir) / f"view_{i}.png")
+        sys.exit(0)
+    except Exception:
+        sys.exit(1)
+
+
+def render_model(args_tuple):
+    """Render one model in a subprocess with hard timeout."""
+    step_path, output_dir, image_size = args_tuple
+    output_dir = Path(output_dir)
+    if (output_dir / "view_5.png").exists():
         return True
+
+    import subprocess
+    try:
+        result = subprocess.run(
+            [sys.executable, __file__, "--_worker",
+             str(step_path), str(output_dir), str(image_size)],
+            timeout=8,
+            capture_output=True,
+        )
+        return result.returncode == 0 and (output_dir / "view_5.png").exists()
+    except subprocess.TimeoutExpired:
+        return False
     except Exception:
         return False
 
 
 def render_all_fast(input_dir: Path, output_dir: Path,
-                    image_size: int = 224, workers: int = 32):
+                    image_size: int = 224, workers: int = 24):
     files = sorted(input_dir.rglob("*.step")) + sorted(input_dir.rglob("*.stp"))
     print(f"Found {len(files)} STEP files")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -109,9 +115,7 @@ def render_all_fast(input_dir: Path, output_dir: Path,
         return
 
     failed = 0
-    # Use maxtasksperchild to recycle workers and avoid memory leaks
-    from multiprocessing import Pool
-    with Pool(processes=workers, maxtasksperchild=50) as pool:
+    with Pool(processes=workers, maxtasksperchild=100) as pool:
         with tqdm(total=len(tasks), desc="Rendering") as pbar:
             for result in pool.imap_unordered(render_model, tasks, chunksize=1):
                 if not result:
@@ -119,14 +123,18 @@ def render_all_fast(input_dir: Path, output_dir: Path,
                 pbar.update(1)
 
     done = sum(1 for f in files if (output_dir / f.stem / "view_5.png").exists())
-    print(f"Done: {done}/{len(files)}, Failed: {failed}")
+    print(f"Done: {done}/{len(files)}, Failed/skipped: {failed}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input", type=Path, default=Path("/home/cc/data/abc_step/step"))
-    parser.add_argument("--output", type=Path, default=Path("/home/cc/data/renders"))
-    parser.add_argument("--size", type=int, default=224)
-    parser.add_argument("--workers", type=int, default=32)
-    args = parser.parse_args()
-    render_all_fast(args.input, args.output, args.size, args.workers)
+    if len(sys.argv) >= 2 and sys.argv[1] == "--_worker":
+        # Called as subprocess worker
+        _render_worker(sys.argv[2], sys.argv[3], int(sys.argv[4]))
+    else:
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--input", type=Path, default=Path("/home/cc/data/abc_step/step"))
+        parser.add_argument("--output", type=Path, default=Path("/home/cc/data/renders"))
+        parser.add_argument("--size", type=int, default=224)
+        parser.add_argument("--workers", type=int, default=24)
+        args = parser.parse_args()
+        render_all_fast(args.input, args.output, args.size, args.workers)
