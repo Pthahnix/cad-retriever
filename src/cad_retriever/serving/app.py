@@ -84,5 +84,15 @@ def create_app(
     return app
 
 
-# Module-level app for uvicorn
-app = create_app()
+# Module-level app for uvicorn — only created if FAISS index exists
+import os as _os
+_data_root = Path(_os.environ.get("CAD_DATA_ROOT", "/home/cc/data"))
+_index_path = _data_root / "cad.index"
+if _index_path.exists():
+    app = create_app()
+else:
+    app = FastAPI(title="CAD Sketch Retriever (not ready)")
+
+    @app.get("/health")
+    def _health_not_ready():
+        return {"status": "not_ready", "reason": "FAISS index not found at " + str(_index_path)}
