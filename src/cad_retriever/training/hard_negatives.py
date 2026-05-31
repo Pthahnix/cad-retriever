@@ -1,19 +1,26 @@
+import json
 import numpy as np
 import faiss
 from pathlib import Path
+from tqdm import tqdm
 
 
 def mine_hard_negatives(
     embeddings_dir: Path,
     model_ids: list[str],
-    top_k: int = 50,
+    output_path: Path,
+    top_k: int = 20,
     hard_range: tuple[int, int] = (5, 20),
 ) -> dict[str, list[str]]:
-    """For each model, find hard negatives (rank 5-20 in current embedding space)."""
+    """Mine hard negatives: for each model, find rank 5-20 nearest neighbors."""
     vectors = []
-    for mid in model_ids:
-        vec = np.load(embeddings_dir / f"{mid}.npy")
-        vectors.append(vec)
+    valid_ids = []
+    for mid in tqdm(model_ids, desc="Loading embeddings"):
+        path = embeddings_dir / f"{mid}.npy"
+        if path.exists():
+            vectors.append(np.load(path))
+            valid_ids.append(mid)
+
     vectors = np.stack(vectors).astype(np.float32)
     vectors = vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
 
@@ -22,9 +29,15 @@ def mine_hard_negatives(
     index.add(vectors)
     _, indices = index.search(vectors, top_k)
 
-    hard_negs = {}
     lo, hi = hard_range
-    for i, mid in enumerate(model_ids):
+    hard_negs = {}
+    for i, mid in enumerate(valid_ids):
         neg_indices = indices[i, lo:hi]
-        hard_negs[mid] = [model_ids[j] for j in neg_indices]
+        hard_negs[mid] = [valid_ids[j] for j in neg_indices if j != i]
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w") as f:
+        json.dump(hard_negs, f)
+
+    print(f"Mined hard negatives for {len(hard_negs)} models → {output_path}")
     return hard_negs
