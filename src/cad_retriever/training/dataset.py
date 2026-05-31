@@ -1,3 +1,4 @@
+import random
 import numpy as np
 import torch
 from torch.utils.data import Dataset
@@ -39,6 +40,30 @@ class Phase1Dataset(Dataset):
         return {"views": torch.stack(views), "model_id": mid}
 
 
+class Phase1ContrastiveDataset(Dataset):
+    """Returns two random views of the same model for contrastive learning."""
+
+    def __init__(self, renders_dir: Path, model_ids: list[str], num_views: int = 6):
+        self.renders_dir = Path(renders_dir)
+        self.model_ids = model_ids
+        self.num_views = num_views
+
+    def __len__(self) -> int:
+        return len(self.model_ids)
+
+    def __getitem__(self, idx: int) -> dict:
+        mid = self.model_ids[idx]
+        views = list(range(self.num_views))
+        v_a, v_b = random.sample(views, 2)
+        img_a = Image.open(self.renders_dir / mid / f"view_{v_a}.png").convert("RGB")
+        img_b = Image.open(self.renders_dir / mid / f"view_{v_b}.png").convert("RGB")
+        return {
+            "view_a": TRANSFORM(img_a),
+            "view_b": TRANSFORM(img_b),
+            "model_id": mid,
+        }
+
+
 class Phase2Dataset(Dataset):
     def __init__(self, sketches_dir: Path, embeddings_dir: Path,
                  model_ids: list[str], num_views: int = 6):
@@ -67,3 +92,4 @@ class Phase2Dataset(Dataset):
             "sketch": sketch_tensor,
             "cad_embedding": torch.from_numpy(cad_emb),
         }
+
