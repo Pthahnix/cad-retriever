@@ -92,6 +92,7 @@ def render_one_model(stl_path: str, output_dir: str, image_size: int = 224) -> b
 
 def step_to_stl(step_path: str) -> str | None:
     """Convert STEP to STL via OCP. Returns STL path or None."""
+    import tempfile
     from OCP.STEPControl import STEPControl_Reader
     from OCP.BRepMesh import BRepMesh_IncrementalMesh
     from OCP.StlAPI import StlAPI_Writer
@@ -106,7 +107,10 @@ def step_to_stl(step_path: str) -> str | None:
         shape = reader.OneShape()
         BRepMesh_IncrementalMesh(shape, 0.5).Perform()
 
-        stl_path = str(TMP_DIR / f"{Path(step_path).stem}.stl")
+        # Use a unique temp file to avoid race conditions with 24 parallel workers
+        with tempfile.NamedTemporaryFile(suffix='.stl', delete=False,
+                                         dir=str(TMP_DIR)) as f:
+            stl_path = f.name
         StlAPI_Writer().Write(shape, stl_path)
         return stl_path
     except Exception:
