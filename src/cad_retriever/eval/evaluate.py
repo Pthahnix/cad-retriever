@@ -28,10 +28,16 @@ def evaluate(config: Config, test_model_ids: list[str], all_model_ids: list[str]
     # Load index
     faiss_index = load_faiss_index(config.index_path)
 
-    # Build model_id → index mapping
-    id_to_idx = {mid: i for i, mid in enumerate(all_model_ids)}
+    # Build model_id → index mapping using the same list the FAISS index was built from
+    embedded_ids_path = config.data_root / "embedded_model_ids.txt"
+    if embedded_ids_path.exists():
+        index_model_ids = embedded_ids_path.read_text().strip().split("\n")
+    else:
+        index_model_ids = all_model_ids
+    id_to_idx = {mid: i for i, mid in enumerate(index_model_ids)}
 
-    # Evaluate
+    # Evaluate — only test models that are in the index
+    test_model_ids = [mid for mid in test_model_ids if mid in id_to_idx]
     dataset = Phase2Dataset(
         sketches_dir=config.sketches_dir,
         embeddings_dir=config.embeddings_dir,
@@ -42,6 +48,7 @@ def evaluate(config: Config, test_model_ids: list[str], all_model_ids: list[str]
 
     all_retrieved = []
     all_gt = []
+    entry_counter = 0
 
     with torch.no_grad():
         for batch in tqdm(loader, desc="Evaluating"):
@@ -51,11 +58,10 @@ def evaluate(config: Config, test_model_ids: list[str], all_model_ids: list[str]
                                       top_k=100, nprobe=config.faiss_nprobe)
             all_retrieved.append(indices)
             batch_size = sketches.shape[0]
-            start_idx = len(all_gt)
             for i in range(batch_size):
-                entry_idx = start_idx + i
-                mid, _ = dataset._entries[entry_idx]
+                mid, _ = dataset._entries[entry_counter + i]
                 all_gt.append(id_to_idx[mid])
+            entry_counter += batch_size
 
     retrieved = np.concatenate(all_retrieved, axis=0)
     ground_truth = np.array(all_gt)
