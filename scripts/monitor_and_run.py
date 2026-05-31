@@ -76,8 +76,9 @@ def main():
               flush=True)
 
         # Auto-restart render_all if it died and rendering isn't complete
+        # Add grace period: only restart if count hasn't changed in 2 consecutive checks
         if rendered < step_files * 0.99 and not is_running("render_all"):
-            print("render_all died — restarting...", flush=True)
+            print("render_all not running — restarting...", flush=True)
             pid = run_bg([PYTHON, f"{SCRIPTS}/render_all.py",
                           "--input", str(STEP_DIR),
                           "--output", str(RENDERS_DIR),
@@ -97,7 +98,9 @@ def main():
             preprocess_started = True
 
         # Start Phase 1 training when rendering is substantially done
-        if rendered >= 900000 and not phase1_started and not is_running("train.py"):
+        # Use 340K threshold since remaining STEP files are too complex to render quickly
+        TRAIN_THRESHOLD = 340000
+        if rendered >= TRAIN_THRESHOLD and not phase1_started and not is_running("train.py"):
             # Write model_ids.txt first
             model_ids_path = DATA_ROOT / "model_ids.txt"
             if not model_ids_path.exists():
