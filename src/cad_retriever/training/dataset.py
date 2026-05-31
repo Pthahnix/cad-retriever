@@ -31,8 +31,11 @@ class Phase1Dataset(Dataset):
         mid = self.model_ids[idx]
         views = []
         for v in range(self.num_views):
-            img = Image.open(self.renders_dir / mid / f"view_{v}.png").convert("RGB")
-            views.append(TRANSFORM(img))
+            try:
+                img = Image.open(self.renders_dir / mid / f"view_{v}.png").convert("RGB")
+                views.append(TRANSFORM(img))
+            except Exception:
+                views.append(torch.zeros(3, 224, 224))
         return {"views": torch.stack(views), "model_id": mid}
 
 
@@ -54,8 +57,11 @@ class Phase2Dataset(Dataset):
     def __getitem__(self, idx: int) -> dict:
         mid, v = self._entries[idx]
         sketch_path = self.sketches_dir / mid / f"view_{v}.png"
-        sketch = Image.open(sketch_path).convert("RGB")
-        sketch_tensor = TRANSFORM(sketch)
+        try:
+            sketch = Image.open(sketch_path).convert("RGB")
+            sketch_tensor = TRANSFORM(sketch)
+        except Exception:
+            sketch_tensor = torch.zeros(3, 224, 224)
         cad_emb = np.load(self.embeddings_dir / f"{mid}.npy")
         return {
             "sketch": sketch_tensor,

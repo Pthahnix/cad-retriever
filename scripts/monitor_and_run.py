@@ -100,13 +100,16 @@ def main():
         # Start Phase 1 training when rendering is substantially done
         # Use 340K threshold since remaining STEP files are too complex to render quickly
         TRAIN_THRESHOLD = 340000
-        if rendered >= TRAIN_THRESHOLD and not phase1_started and not is_running("train.py"):
-            # Write model_ids.txt first
-            model_ids_path = DATA_ROOT / "model_ids.txt"
-            if not model_ids_path.exists():
-                step_files_list = sorted(Path(STEP_DIR).rglob("*.step"))
-                model_ids_path.write_text("\n".join(f.stem for f in step_files_list))
-            print("Starting Phase 1 training...", flush=True)
+        proj_head = DATA_ROOT / "projection_head_a.pt"
+        # Start or restart Phase 1 if threshold met and projection head not yet saved
+        if rendered >= TRAIN_THRESHOLD and not proj_head.exists() and not is_running("train.py"):
+            if not phase1_started:
+                # Write model_ids.txt first
+                model_ids_path = DATA_ROOT / "model_ids.txt"
+                if not model_ids_path.exists():
+                    step_files_list = sorted(Path(STEP_DIR).rglob("*.step"))
+                    model_ids_path.write_text("\n".join(f.stem for f in step_files_list))
+            print("Starting/restarting Phase 1 training...", flush=True)
             pid = run_bg([PYTHON, f"{SCRIPTS}/train.py", "--phase", "1",
                           "--data-root", str(DATA_ROOT)],
                          DATA_ROOT / "train_phase1.log")
@@ -114,7 +117,6 @@ def main():
             phase1_started = True
 
         # Start embedding after Phase 1
-        proj_head = DATA_ROOT / "projection_head_a.pt"
         if proj_head.exists() and not embed_started and not is_running("embed_all"):
             print("Starting embedding...", flush=True)
             pid = run_bg([PYTHON, f"{SCRIPTS}/embed_all.py",
@@ -123,8 +125,8 @@ def main():
             print(f"Embed PID: {pid}", flush=True)
             embed_started = True
 
-        # Build index after embeddings
-        if embeddings >= 900000 and not index_started and not is_running("build_index"):
+        # Build index after embeddings (we have ~350K models, not 900K)
+        if embeddings >= 300000 and not index_started and not is_running("build_index"):
             print("Building FAISS index...", flush=True)
             pid = run_bg([PYTHON, f"{SCRIPTS}/build_index.py",
                           "--data-root", str(DATA_ROOT)],
