@@ -41,6 +41,14 @@ def count_files(directory, pattern):
     d = Path(directory)
     if not d.exists():
         return 0
+    # Use ls for speed on large directories (view_5.png = one per model)
+    if pattern == "view_5.png":
+        try:
+            import subprocess
+            result = subprocess.run(["ls", str(d)], capture_output=True, text=True, timeout=10)
+            return len(result.stdout.strip().split('\n')) if result.stdout.strip() else 0
+        except Exception:
+            return 0
     return sum(1 for _ in d.rglob(pattern))
 
 
