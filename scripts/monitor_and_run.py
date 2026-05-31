@@ -126,7 +126,7 @@ def main():
             embed_started = True
 
         # Build index after embeddings (we have ~350K models, not 900K)
-        if embeddings >= 300000 and not index_started and not is_running("build_index"):
+        if embeddings >= 300000 and not index_started and not index_exists and not is_running("build_index"):
             print("Building FAISS index...", flush=True)
             pid = run_bg([PYTHON, f"{SCRIPTS}/build_index.py",
                           "--data-root", str(DATA_ROOT)],
