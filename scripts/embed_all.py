@@ -23,7 +23,11 @@ encoder.projection.load_state_dict(
 )
 encoder.eval()
 
-model_ids = (config.data_root / "model_ids.txt").read_text().strip().split("\n")
+all_model_ids = (config.data_root / "model_ids.txt").read_text().strip().split("\n")
+# Only embed models that have renders
+model_ids = [mid for mid in all_model_ids
+             if (config.renders_dir / mid / "view_5.png").exists()]
+print(f"Embedding {len(model_ids)}/{len(all_model_ids)} models with renders")
 dataset = Phase1Dataset(config.renders_dir, model_ids, config.num_views)
 loader = DataLoader(dataset, batch_size=args.batch_size, num_workers=8, pin_memory=True)
 

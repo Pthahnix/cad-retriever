@@ -13,10 +13,13 @@ def main():
 
     config = Config(data_root=args.data_root)
 
-    # Load model IDs from manifest
+    # Load model IDs — filter to only those with renders
     manifest = config.data_root / "model_ids.txt"
-    model_ids = manifest.read_text().strip().split("\n")
-    print(f"Loaded {len(model_ids)} model IDs")
+    all_model_ids = manifest.read_text().strip().split("\n")
+    renders_dir = config.renders_dir
+    model_ids = [mid for mid in all_model_ids
+                 if (renders_dir / mid / "view_5.png").exists()]
+    print(f"Loaded {len(all_model_ids)} model IDs, {len(model_ids)} have renders")
 
     if args.phase == 1:
         from cad_retriever.training.train_phase1 import train_phase1
