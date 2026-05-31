@@ -1,7 +1,7 @@
 """
 Fast silhouette rendering pipeline for 1M CAD models.
 Uses OCP (STEP→mesh) + PIL (silhouette projection).
-Hard per-model timeout via subprocess to handle complex STEP files.
+Per-model timeout via multiprocessing.Process.join(timeout).
 """
 import argparse
 import os
@@ -10,7 +10,7 @@ import sys
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
-from multiprocessing import Pool
+from multiprocessing import Pool, Process, Queue
 from PIL import Image, ImageDraw
 
 
@@ -36,8 +36,8 @@ def render_silhouette(verts, faces, elev_deg, azim_deg, size=224):
     return img
 
 
-def _render_worker(step_path, output_dir, image_size):
-    """Called in a subprocess — renders one model and exits."""
+def _do_render(step_path, output_dir, image_size, result_q):
+    """Worker function — runs in a separate Process."""
     try:
         from OCP.STEPControl import STEPControl_Reader
         from OCP.BRepMesh import BRepMesh_IncrementalMesh
@@ -46,7 +46,7 @@ def _render_worker(step_path, output_dir, image_size):
 
         reader = STEPControl_Reader()
         if reader.ReadFile(str(step_path)) != 1:
-            sys.exit(1)
+            result_q.put(False); return
         reader.TransferRoots()
         shape = reader.OneShape()
         BRepMesh_IncrementalMesh(shape, 1.0).Perform()
@@ -58,7 +58,7 @@ def _render_worker(step_path, output_dir, image_size):
         os.unlink(stl_path)
 
         if not hasattr(mesh, 'vertices') or len(mesh.vertices) == 0:
-            sys.exit(1)
+            result_q.put(False); return
 
         center = mesh.centroid
         scale = max(mesh.extents) if max(mesh.extents) > 0 else 1.0
@@ -69,31 +69,27 @@ def _render_worker(step_path, output_dir, image_size):
         for i, (elev, azim) in enumerate(VIEW_ANGLES):
             img = render_silhouette(verts, faces, elev, azim, image_size)
             img.save(Path(output_dir) / f"view_{i}.png")
-        sys.exit(0)
+        result_q.put(True)
     except Exception:
-        sys.exit(1)
+        result_q.put(False)
 
 
 def render_model(args_tuple):
-    """Render one model in a subprocess with hard timeout."""
+    """Render one model with hard timeout via Process.join."""
     step_path, output_dir, image_size = args_tuple
     output_dir = Path(output_dir)
     if (output_dir / "view_5.png").exists():
         return True
 
-    import subprocess
-    try:
-        result = subprocess.run(
-            [sys.executable, __file__, "--_worker",
-             str(step_path), str(output_dir), str(image_size)],
-            timeout=8,
-            capture_output=True,
-        )
-        return result.returncode == 0 and (output_dir / "view_5.png").exists()
-    except subprocess.TimeoutExpired:
+    q = Queue()
+    p = Process(target=_do_render, args=(step_path, output_dir, image_size, q))
+    p.start()
+    p.join(timeout=10)  # 10s hard timeout — no subprocess overhead
+    if p.is_alive():
+        p.kill()
+        p.join()
         return False
-    except Exception:
-        return False
+    return q.get() if not q.empty() else False
 
 
 def render_all_fast(input_dir: Path, output_dir: Path,
@@ -127,14 +123,10 @@ def render_all_fast(input_dir: Path, output_dir: Path,
 
 
 if __name__ == "__main__":
-    if len(sys.argv) >= 2 and sys.argv[1] == "--_worker":
-        # Called as subprocess worker
-        _render_worker(sys.argv[2], sys.argv[3], int(sys.argv[4]))
-    else:
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--input", type=Path, default=Path("/home/cc/data/abc_step/step"))
-        parser.add_argument("--output", type=Path, default=Path("/home/cc/data/renders"))
-        parser.add_argument("--size", type=int, default=224)
-        parser.add_argument("--workers", type=int, default=24)
-        args = parser.parse_args()
-        render_all_fast(args.input, args.output, args.size, args.workers)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input", type=Path, default=Path("/home/cc/data/abc_step/step"))
+    parser.add_argument("--output", type=Path, default=Path("/home/cc/data/renders"))
+    parser.add_argument("--size", type=int, default=224)
+    parser.add_argument("--workers", type=int, default=24)
+    args = parser.parse_args()
+    render_all_fast(args.input, args.output, args.size, args.workers)
