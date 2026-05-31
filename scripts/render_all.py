@@ -1,21 +1,22 @@
 """
 Fast silhouette rendering pipeline for 1M CAD models.
-Uses OCP (STEP→mesh) + PIL (silhouette projection).
-SIGALRM timeout per model (works in Pool workers on Linux).
+ThreadPoolExecutor launches Process per model — threads can spawn non-daemon processes.
+Hard 8s timeout via Process.join(timeout) + p.kill().
 """
 import argparse
 import os
 import math
-import signal
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
-from multiprocessing import Pool
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import multiprocessing
+import tempfile
 from PIL import Image, ImageDraw
 
 
 VIEW_ANGLES = [(30,0),(30,60),(30,120),(30,180),(30,240),(30,300)]
-TIMEOUT_SECS = 10  # skip models that take longer than this
+TIMEOUT_SECS = 8
 
 
 def render_silhouette(verts, faces, elev_deg, azim_deg, size=224):
@@ -37,27 +38,17 @@ def render_silhouette(verts, faces, elev_deg, azim_deg, size=224):
     return img
 
 
-def render_model(args_tuple):
-    """Render one model with SIGALRM timeout."""
-    step_path, output_dir, image_size = args_tuple
-    output_dir = Path(output_dir)
-    if (output_dir / "view_5.png").exists():
-        return True
-
-    def _alarm(signum, frame):
-        raise TimeoutError()
-
-    old_handler = signal.signal(signal.SIGALRM, _alarm)
-    signal.alarm(TIMEOUT_SECS)
+def _render_process(step_path, output_dir_str, image_size, pipe_out):
+    """Runs in a child Process. Sends True/False through pipe."""
     try:
         from OCP.STEPControl import STEPControl_Reader
         from OCP.BRepMesh import BRepMesh_IncrementalMesh
         from OCP.StlAPI import StlAPI_Writer
-        import trimesh, tempfile
+        import trimesh
 
         reader = STEPControl_Reader()
         if reader.ReadFile(str(step_path)) != 1:
-            return False
+            pipe_out.send(False); return
         reader.TransferRoots()
         shape = reader.OneShape()
         BRepMesh_IncrementalMesh(shape, 1.0).Perform()
@@ -69,24 +60,48 @@ def render_model(args_tuple):
         os.unlink(stl_path)
 
         if not hasattr(mesh, 'vertices') or len(mesh.vertices) == 0:
-            return False
+            pipe_out.send(False); return
 
         center = mesh.centroid
         scale = max(mesh.extents) if max(mesh.extents) > 0 else 1.0
         verts = (mesh.vertices - center) / scale
         faces = mesh.faces
 
+        output_dir = Path(output_dir_str)
         output_dir.mkdir(parents=True, exist_ok=True)
         for i, (elev, azim) in enumerate(VIEW_ANGLES):
             img = render_silhouette(verts, faces, elev, azim, image_size)
             img.save(output_dir / f"view_{i}.png")
+        pipe_out.send(True)
+    except Exception:
+        try: pipe_out.send(False)
+        except: pass
+
+
+def render_one(args_tuple):
+    """Render one model in a child Process with hard timeout."""
+    step_path, output_dir, image_size = args_tuple
+    output_dir = Path(output_dir)
+    if (output_dir / "view_5.png").exists():
         return True
 
-    except (TimeoutError, Exception):
+    pipe_out, pipe_in = multiprocessing.Pipe(duplex=False)
+    p = multiprocessing.Process(
+        target=_render_process,
+        args=(step_path, str(output_dir), image_size, pipe_in),
+        daemon=False,  # non-daemon so it can be spawned from threads
+    )
+    p.start()
+    pipe_in.close()
+    p.join(timeout=TIMEOUT_SECS)
+    if p.is_alive():
+        p.kill()
+        p.join()
+        pipe_out.close()
         return False
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, old_handler)
+    result = pipe_out.recv() if pipe_out.poll() else False
+    pipe_out.close()
+    return result
 
 
 def render_all_fast(input_dir: Path, output_dir: Path,
@@ -108,11 +123,14 @@ def render_all_fast(input_dir: Path, output_dir: Path,
         return
 
     failed = 0
-    # maxtasksperchild recycles workers to prevent OCP memory leaks
-    with Pool(processes=workers, maxtasksperchild=200) as pool:
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(render_one, t): t for t in tasks}
         with tqdm(total=len(tasks), desc="Rendering") as pbar:
-            for result in pool.imap_unordered(render_model, tasks, chunksize=1):
-                if not result:
+            for future in as_completed(futures):
+                try:
+                    if not future.result():
+                        failed += 1
+                except Exception:
                     failed += 1
                 pbar.update(1)
 
