@@ -58,7 +58,6 @@ class SketchEncoder(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """x: (B, 3, H, W)"""
-        with torch.no_grad():
-            feats = self.visual(x)  # (B, 768)
-        out = self.projection(feats)  # (B, 512)
+        feats = self.visual(x)  # (B, clip_dim) — LoRA gets gradients
+        out = self.projection(feats)  # (B, embed_dim)
         return nn.functional.normalize(out, dim=-1)

@@ -21,16 +21,16 @@ class LoRALinear(nn.Module):
 
     @property
     def weight(self):
-        return self.original.weight
+        # Return combined weight so PyTorch MHA's F.multi_head_attention_forward
+        # picks up LoRA parameters in the computation graph.
+        return self.original.weight + self.lora_B @ self.lora_A
 
     @property
     def bias(self):
         return self.original.bias
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        base = self.original(x)
-        lora = (x @ self.lora_A.T) @ self.lora_B.T
-        return base + lora
+        return nn.functional.linear(x, self.weight, self.bias)
 
 
 def apply_lora(model: nn.Module, rank: int, target_modules: tuple = ("out_proj",)):
