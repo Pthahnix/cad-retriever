@@ -118,24 +118,35 @@ def step_to_stl(step_path: str) -> str | None:
 
 
 def render_worker(args_tuple):
-    """Worker: STEP → STL → render 6 views."""
+    """Worker: STEP → STL → render 6 views. Hard 30s timeout via signal."""
+    import signal
+
     step_path, output_dir, image_size = args_tuple
     output_dir = Path(output_dir)
     if (output_dir / "view_5.png").exists():
         return True
 
-    stl_path = step_to_stl(step_path)
-    if stl_path is None:
-        return False
+    def _timeout_handler(signum, frame):
+        raise TimeoutError("render timed out")
 
+    signal.signal(signal.SIGALRM, _timeout_handler)
+    signal.alarm(30)  # 30-second hard timeout per model
     try:
-        result = render_one_model(stl_path, str(output_dir), image_size)
-    finally:
+        stl_path = step_to_stl(step_path)
+        if stl_path is None:
+            return False
         try:
-            os.unlink(stl_path)
-        except OSError:
-            pass
-    return result
+            result = render_one_model(stl_path, str(output_dir), image_size)
+        finally:
+            try:
+                os.unlink(stl_path)
+            except OSError:
+                pass
+        return result
+    except (TimeoutError, Exception):
+        return False
+    finally:
+        signal.alarm(0)
 
 
 if __name__ == "__main__":
@@ -165,19 +176,27 @@ if __name__ == "__main__":
         exit(0)
 
     failed = 0
-    BATCH = args.workers * 4  # keep queue shallow to avoid memory/crash issues
-    with ProcessPoolExecutor(max_workers=args.workers) as executor:
-        with tqdm(total=len(tasks), desc="Rendering") as pbar:
-            for i in range(0, len(tasks), BATCH):
-                batch = tasks[i:i + BATCH]
-                futures = {executor.submit(render_worker, t): t for t in batch}
-                for future in as_completed(futures):
-                    try:
-                        if not future.result():
+    i = 0
+    with tqdm(total=len(tasks), desc="Rendering") as pbar:
+        while i < len(tasks):
+            BATCH = args.workers * 2
+            batch = tasks[i:i + BATCH]
+            try:
+                with ProcessPoolExecutor(max_workers=args.workers) as executor:
+                    futures = {executor.submit(render_worker, t): t for t in batch}
+                    for future in as_completed(futures):
+                        try:
+                            if not future.result(timeout=60):
+                                failed += 1
+                        except Exception:
                             failed += 1
-                    except Exception:
-                        failed += 1
-                    pbar.update(1)
+                        pbar.update(1)
+                i += len(batch)
+            except Exception:
+                # Pool broke - skip this batch and continue
+                failed += len(batch)
+                pbar.update(len(batch))
+                i += len(batch)
 
     done = sum(1 for f in files if (args.output / f.stem / "view_5.png").exists())
     print(f"Done: {done}/{len(files)}, Failed: {failed}")
