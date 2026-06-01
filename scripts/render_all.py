@@ -1,19 +1,22 @@
 """
 Pyrender + EGL GPU offscreen rendering for 1M CAD models.
 Reads STEP → STL (via OCP), then renders 6 views with pyrender.
+Uses multiprocessing.Process with hard timeout per model (like original pipeline).
 """
 import os
 os.environ["PYOPENGL_PLATFORM"] = "egl"
 
 import argparse
 import math
+import multiprocessing
 import numpy as np
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
 VIEW_ANGLES = [(30, 0), (30, 60), (30, 120), (30, 180), (30, 240), (30, 300)]
 TMP_DIR = Path("/home/cc/data/tmp")
+TIMEOUT_SECS = 30
 
 
 def render_one_model(stl_path: str, output_dir: str, image_size: int = 224) -> bool:
@@ -32,7 +35,6 @@ def render_one_model(stl_path: str, output_dir: str, image_size: int = 224) -> b
     except Exception:
         return False
 
-    # Normalize to unit sphere
     center = mesh.centroid
     scale = max(mesh.extents) if max(mesh.extents) > 0 else 1.0
     mesh.vertices = (mesh.vertices - center) / scale
@@ -43,7 +45,6 @@ def render_one_model(stl_path: str, output_dir: str, image_size: int = 224) -> b
         roughnessFactor=0.8,
     )
     pr_mesh = pyrender.Mesh.from_trimesh(mesh, material=material)
-
     renderer = pyrender.OffscreenRenderer(image_size, image_size)
 
     try:
@@ -75,13 +76,12 @@ def render_one_model(stl_path: str, output_dir: str, image_size: int = 224) -> b
 
             camera = pyrender.PerspectiveCamera(yfov=math.pi / 4)
             scene.add(camera, pose=pose)
-
             light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=3.0)
             scene.add(light, pose=pose)
 
             color, _ = renderer.render(scene)
-            img = Image.fromarray(color)
-            img.save(output_dir / f"view_{i}.png")
+            from PIL import Image as PILImage
+            PILImage.fromarray(color).save(output_dir / f"view_{i}.png")
     except Exception:
         renderer.delete()
         return False
@@ -90,63 +90,67 @@ def render_one_model(stl_path: str, output_dir: str, image_size: int = 224) -> b
     return True
 
 
-def step_to_stl(step_path: str) -> str | None:
-    """Convert STEP to STL via OCP. Returns STL path or None."""
+def _render_process(step_path, output_dir_str, image_size, result_conn):
+    """Runs in child Process. Sends True/False via pipe."""
     import tempfile
     from OCP.STEPControl import STEPControl_Reader
     from OCP.BRepMesh import BRepMesh_IncrementalMesh
     from OCP.StlAPI import StlAPI_Writer
 
     TMP_DIR.mkdir(parents=True, exist_ok=True)
-
+    stl_path = None
     try:
         reader = STEPControl_Reader()
-        if reader.ReadFile(step_path) != 1:
-            return None
+        if reader.ReadFile(str(step_path)) != 1:
+            result_conn.send(False)
+            return
         reader.TransferRoots()
         shape = reader.OneShape()
         BRepMesh_IncrementalMesh(shape, 0.5).Perform()
 
-        # Use a unique temp file to avoid race conditions with 24 parallel workers
         with tempfile.NamedTemporaryFile(suffix='.stl', delete=False,
                                          dir=str(TMP_DIR)) as f:
             stl_path = f.name
         StlAPI_Writer().Write(shape, stl_path)
-        return stl_path
+
+        result = render_one_model(stl_path, output_dir_str, image_size)
+        result_conn.send(result)
     except Exception:
-        return None
-
-
-def render_worker(args_tuple):
-    """Worker: STEP → STL → render 6 views. Hard 30s timeout via signal."""
-    import signal
-
-    step_path, output_dir, image_size = args_tuple
-    output_dir = Path(output_dir)
-    if (output_dir / "view_5.png").exists():
-        return True
-
-    def _timeout_handler(signum, frame):
-        raise TimeoutError("render timed out")
-
-    signal.signal(signal.SIGALRM, _timeout_handler)
-    signal.alarm(30)  # 30-second hard timeout per model
-    try:
-        stl_path = step_to_stl(step_path)
-        if stl_path is None:
-            return False
         try:
-            result = render_one_model(stl_path, str(output_dir), image_size)
-        finally:
+            result_conn.send(False)
+        except Exception:
+            pass
+    finally:
+        if stl_path:
             try:
                 os.unlink(stl_path)
             except OSError:
                 pass
-        return result
-    except (TimeoutError, Exception):
+
+
+def render_one(args_tuple):
+    """Render one model in a child Process with hard timeout."""
+    step_path, output_dir, image_size = args_tuple
+    if (Path(output_dir) / "view_5.png").exists():
+        return True
+
+    parent_conn, child_conn = multiprocessing.Pipe(duplex=False)
+    p = multiprocessing.Process(
+        target=_render_process,
+        args=(step_path, output_dir, image_size, child_conn),
+        daemon=False,
+    )
+    p.start()
+    child_conn.close()
+    p.join(timeout=TIMEOUT_SECS)
+    if p.is_alive():
+        p.kill()
+        p.join()
+        parent_conn.close()
         return False
-    finally:
-        signal.alarm(0)
+    result = parent_conn.recv() if parent_conn.poll() else False
+    parent_conn.close()
+    return result
 
 
 if __name__ == "__main__":
@@ -156,12 +160,13 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path,
                         default=Path("/home/cc/data/renders"))
     parser.add_argument("--size", type=int, default=224)
-    parser.add_argument("--workers", type=int, default=16)
+    parser.add_argument("--workers", type=int, default=24)
     args = parser.parse_args()
 
     files = sorted(args.input.rglob("*.step"))
     print(f"Found {len(files)} STEP files")
     args.output.mkdir(parents=True, exist_ok=True)
+    TMP_DIR.mkdir(parents=True, exist_ok=True)
 
     tasks = [
         (str(f), str(args.output / f.stem), args.size)
@@ -176,27 +181,17 @@ if __name__ == "__main__":
         exit(0)
 
     failed = 0
-    i = 0
-    with tqdm(total=len(tasks), desc="Rendering") as pbar:
-        while i < len(tasks):
-            BATCH = args.workers * 2
-            batch = tasks[i:i + BATCH]
-            try:
-                with ProcessPoolExecutor(max_workers=args.workers) as executor:
-                    futures = {executor.submit(render_worker, t): t for t in batch}
-                    for future in as_completed(futures):
-                        try:
-                            if not future.result(timeout=60):
-                                failed += 1
-                        except Exception:
-                            failed += 1
-                        pbar.update(1)
-                i += len(batch)
-            except Exception:
-                # Pool broke - skip this batch and continue
-                failed += len(batch)
-                pbar.update(len(batch))
-                i += len(batch)
+    # ThreadPoolExecutor launches Process per model; threads can spawn non-daemon processes
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+        futures = {executor.submit(render_one, t): t for t in tasks}
+        with tqdm(total=len(tasks), desc="Rendering") as pbar:
+            for future in as_completed(futures):
+                try:
+                    if not future.result():
+                        failed += 1
+                except Exception:
+                    failed += 1
+                pbar.update(1)
 
     done = sum(1 for f in files if (args.output / f.stem / "view_5.png").exists())
     print(f"Done: {done}/{len(files)}, Failed: {failed}")
