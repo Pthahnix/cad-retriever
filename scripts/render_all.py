@@ -165,16 +165,19 @@ if __name__ == "__main__":
         exit(0)
 
     failed = 0
+    BATCH = args.workers * 4  # keep queue shallow to avoid memory/crash issues
     with ProcessPoolExecutor(max_workers=args.workers) as executor:
-        futures = {executor.submit(render_worker, t): t for t in tasks}
         with tqdm(total=len(tasks), desc="Rendering") as pbar:
-            for future in as_completed(futures):
-                try:
-                    if not future.result():
+            for i in range(0, len(tasks), BATCH):
+                batch = tasks[i:i + BATCH]
+                futures = {executor.submit(render_worker, t): t for t in batch}
+                for future in as_completed(futures):
+                    try:
+                        if not future.result():
+                            failed += 1
+                    except Exception:
                         failed += 1
-                except Exception:
-                    failed += 1
-                pbar.update(1)
+                    pbar.update(1)
 
     done = sum(1 for f in files if (args.output / f.stem / "view_5.png").exists())
     print(f"Done: {done}/{len(files)}, Failed: {failed}")
