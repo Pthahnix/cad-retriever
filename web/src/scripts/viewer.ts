@@ -36,6 +36,7 @@ function open(model: Model) {
   // Defer scene setup until after layout so clientWidth reflects the
   // real container width (it is 0 before first paint on first open).
   requestAnimationFrame(() => {
+    if (modal.hidden) return; // closed before layout fired — don't build into a torn-down state
     const w = canvasHost.clientWidth || 480;
     const h = 360;
     const scene = new THREE.Scene();
