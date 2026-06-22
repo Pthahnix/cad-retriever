@@ -5,6 +5,14 @@
 > Scope: a self-contained static web app that *demonstrates* cross-modal CAD retrieval.
 > Not in scope: the real retrieval model, real pipeline outputs, any backend or ML inference.
 
+> **Amendment 2026-06-22 (simplification):** the Python CAD generator (build123d) is
+> dropped for the first build. No real STEP/GLB/PNG assets are produced. Instead
+> `models.json` is hand-written, and the three.js viewer renders **procedural primitive
+> geometry** (cylinders/boxes composed per `shape`) as a stand-in. Card thumbnails are
+> CSS placeholders; the "Download STEP" link is deferred until real models exist.
+> Sections 4–5 and 7 below describe the original generator-based plan — superseded by
+> this amendment for now, kept for when we wire in real CAD models.
+
 ---
 
 ## 1. Goal & framing
