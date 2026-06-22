@@ -36,6 +36,7 @@ Each unit is independently runnable and restartable. They share only the manifes
 ## Task 1: Project scaffold + config
 
 **Files:**
+
 - Create: `pyproject.toml`
 - Create: `src/cad_pipeline/__init__.py`
 - Create: `src/cad_pipeline/config.py`
@@ -166,6 +167,7 @@ git commit -m "feat: scaffold cad_pipeline package with config (probe thresholds
 ## Task 2: Manifest schema + LanceDB table
 
 **Files:**
+
 - Create: `src/cad_pipeline/manifest.py`
 - Test: `tests/test_manifest.py`
 
@@ -283,6 +285,7 @@ git commit -m "feat: LanceDB manifest schema with all-stage columns + vector pla
 ## Task 3: Ingest — register extracted STEP files into the manifest
 
 **Files:**
+
 - Create: `src/cad_pipeline/ingest.py`
 - Create: `scripts/run_ingest.py`
 - Test: `tests/test_ingest.py`
@@ -405,6 +408,7 @@ git commit -m "feat: ingest adapter registers ABC STEP files into manifest (idem
 ## Task 4: Probe — flag judgment logic (pure, no OCC)
 
 **Files:**
+
 - Create: `src/cad_pipeline/probe.py` (judgment functions only this task)
 - Test: `tests/test_probe.py`
 
@@ -524,6 +528,7 @@ git commit -m "feat: probe flag-judgment logic (thresholds from config, fatal-fl
 ## Task 5: Probe — OCC topology reader (no mesh)
 
 **Files:**
+
 - Modify: `src/cad_pipeline/probe.py` (add `probe_one`)
 - Test: `tests/test_probe.py` (add an integration test gated on OCP)
 
@@ -643,6 +648,7 @@ git commit -m "feat: probe_one reads STEP topology without meshing (fault-isolat
 ## Task 6: Probe — parallel runner with single serial writer
 
 **Files:**
+
 - Modify: `src/cad_pipeline/probe.py` (add `run_probe`)
 - Create: `scripts/run_probe.py`
 - Test: `tests/test_probe.py` (add `run_probe` end-to-end test)
@@ -787,6 +793,7 @@ git commit -m "feat: parallel probe runner with single serial writer + restart o
 ## Task 7: Download — port the proven downloader
 
 **Files:**
+
 - Create: `src/cad_pipeline/download.py`
 - Create: `scripts/run_download.py`
 - Test: `tests/test_download.py`
@@ -954,6 +961,7 @@ git commit -m "feat: port ABC downloader (7z header check, retries, resume, extr
 ## Task 8: Report — histogram + flag summary (DuckDB over the manifest)
 
 **Files:**
+
 - Create: `src/cad_pipeline/report.py`
 - Create: `scripts/run_report.py`
 - Test: `tests/test_report.py`
@@ -1078,6 +1086,7 @@ git commit -m "feat: probe report — n_faces histogram + flag counts + render_e
 ## Task 9: End-to-end smoke + full-suite run
 
 **Files:**
+
 - Test: `tests/test_smoke.py`
 
 - [ ] **Step 1: Write a no-OCC end-to-end test (ingest -> stubbed probe -> report)**
