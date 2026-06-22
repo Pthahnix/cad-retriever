@@ -26,3 +26,12 @@ h1 { font-size: 1.4rem; }
 .examples { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.6rem; }
 .example { font-size: 0.75rem; background: #eef2f5; border: 1px solid #dde3e8; border-radius: 999px; padding: 0.2rem 0.7rem; cursor: pointer; }
 .status { color: #678; font-size: 0.85rem; }
+.modal { position: fixed; inset: 0; display: grid; place-items: center; z-index: 10; }
+.modal[hidden] { display: none; }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.5); }
+.modal-body { position: relative; background: #fff; border-radius: 10px; padding: 1.25rem; max-width: 560px; width: 90%; }
+.modal-close { position: absolute; top: 0.5rem; right: 0.75rem; border: none; background: none; font-size: 1.5rem; cursor: pointer; }
+.viewer-canvas { width: 100%; min-height: 360px; background: #f4f6f8; border-radius: 6px; }
+.viewer-caption { margin: 0.75rem 0 0.5rem; font-size: 0.95rem; }
+.viewer-meta { display: flex; gap: 0.5rem; font-size: 0.75rem; color: #567; }
+.viewer-meta span { background: #eef2f5; border-radius: 4px; padding: 0.1rem 0.5rem; }
