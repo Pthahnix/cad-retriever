@@ -1,0 +1,18 @@
+:root { font-family: system-ui, sans-serif; color: #1a2530; background: #f4f6f8; }
+body { margin: 0; padding: 2rem; }
+h1 { font-size: 1.4rem; }
+.results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 1rem; transition: opacity 0.2s; }
+.model-card { text-align: left; background: #fff; border: 1px solid #dde3e8; border-radius: 8px; padding: 0.75rem; cursor: pointer; font: inherit; }
+.thumb { width: 100%; aspect-ratio: 1; border-radius: 6px; background: linear-gradient(135deg, #c3d2de, #7c9cb5); display: grid; place-items: center; }
+.thumb::after { content: attr(class); }  /* placeholder; visual only */
+.thumb-disc { background: radial-gradient(circle, #7c9cb5 40%, #c3d2de 42%); }
+.thumb-bracket { background: linear-gradient(135deg, #b5c7d4, #6f93ac); }
+.thumb-nut { background: conic-gradient(#7c9cb5 0 16%, #c3d2de 0 33%, #7c9cb5 0 50%, #c3d2de 0 66%, #7c9cb5 0 83%, #c3d2de 0 100%); }
+.thumb-shaft { background: linear-gradient(90deg, #c3d2de 30%, #7c9cb5 30%); }
+.thumb-plate { background: repeating-linear-gradient(90deg, #7c9cb5 0 8px, #c3d2de 8px 20px); }
+.thumb::after { content: ""; }  /* hide debug text */
+.caption { font-size: 0.85rem; margin: 0.5rem 0; }
+.meta { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center; }
+.score { font-weight: 600; color: #2a7; }
+.chip { font-size: 0.7rem; background: #eef2f5; border-radius: 4px; padding: 0.1rem 0.4rem; }
+.chip.flag { background: #fde2e2; color: #a33; }
