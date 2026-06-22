@@ -16,3 +16,13 @@ h1 { font-size: 1.4rem; }
 .score { font-weight: 600; color: #2a7; }
 .chip { font-size: 0.7rem; background: #eef2f5; border-radius: 4px; padding: 0.1rem 0.4rem; }
 .chip.flag { background: #fde2e2; color: #a33; }
+.search { margin-bottom: 1.5rem; }
+.tabs { display: flex; gap: 0.25rem; margin-bottom: 0.5rem; }
+.tab { font: inherit; padding: 0.3rem 0.8rem; border: 1px solid #dde3e8; background: #fff; border-radius: 6px 6px 0 0; cursor: pointer; }
+.tab.active { background: #1a2530; color: #fff; }
+.input-row { display: flex; gap: 0.5rem; }
+.input-row input[type="text"] { flex: 1; padding: 0.5rem; border: 1px solid #c7d0d8; border-radius: 6px; font: inherit; }
+#search-btn { padding: 0.5rem 1.2rem; border: none; background: #2a7; color: #fff; border-radius: 6px; cursor: pointer; font: inherit; }
+.examples { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.6rem; }
+.example { font-size: 0.75rem; background: #eef2f5; border: 1px solid #dde3e8; border-radius: 999px; padding: 0.2rem 0.7rem; cursor: pointer; }
+.status { color: #678; font-size: 0.85rem; }

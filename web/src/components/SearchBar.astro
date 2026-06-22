@@ -1,0 +1,25 @@
+---
+const examples = [
+  "flat disc with mounting holes",
+  "L-shaped bracket",
+  "hex nut",
+  "stepped shaft",
+];
+---
+<section class="search">
+  <div class="tabs" role="tablist">
+    <button class="tab active" data-mode="text">Text</button>
+    <button class="tab" data-mode="sketch">Sketch</button>
+    <button class="tab" data-mode="image">Image</button>
+  </div>
+  <div class="input-row">
+    <input id="text-input" type="text" placeholder="Describe a CAD part…" />
+    <input id="file-input" type="file" accept="image/*" hidden />
+    <button id="search-btn">Search</button>
+  </div>
+  <div class="examples">
+    {examples.map((e) => <button class="example" data-q={e}>{e}</button>)}
+  </div>
+  <p id="status" class="status" hidden>Searching…</p>
+</section>
+<script src="../scripts/search.ts"></script>
