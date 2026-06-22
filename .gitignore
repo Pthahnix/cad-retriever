@@ -220,3 +220,7 @@ __marimo__/
 # Claude Code
 .claude/
 .mcp.json
+
+# web app
+web/node_modules/
+web/dist/
