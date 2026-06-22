@@ -382,7 +382,7 @@ In the body:
 - [ ] **Step 5: Verify build + grid test still passes**
 
 ```bash
-cd web && npm run build && node --test test/ ; cd ..
+cd web && npm run build && node --test test/grid.test.mjs ; cd ..
 ```
 Expected: build succeeds, grid test PASSES. Manually (`npm run dev`): tabs switch, examples fill the box, Search shows the shimmer.
 
@@ -618,7 +618,7 @@ import ViewerModal from "../components/ViewerModal.astro";
 - [ ] **Step 6: Verify build + grid test + manual viewer check**
 
 ```bash
-cd web && npm run build && node --test test/ ; cd ..
+cd web && npm run build && node --test test/grid.test.mjs ; cd ..
 ```
 Expected: build succeeds, grid test PASSES. Then `cd web && npm run dev`: click each card → modal opens with a rotatable primitive model matching the shape; Esc / click-outside closes.
 
