@@ -1,6 +1,15 @@
 ---
+import Deck from "../layouts/Deck.astro";
+import Slide1Intro from "../components/slides/Slide1Intro.astro";
+import Slide2Dataset from "../components/slides/Slide2Dataset.astro";
+import Slide3Quality from "../components/slides/Slide3Quality.astro";
+import Slide4Arch from "../components/slides/Slide4Arch.astro";
+import Slide5Demo from "../components/slides/Slide5Demo.astro";
 ---
-<html lang="en">
-  <head><meta charset="utf-8" /><title>CAD Retriever — Deck</title></head>
-  <body><p>scaffold ok</p></body>
-</html>
+<Deck title="CAD Retriever — Presentation">
+  <Slide1Intro />
+  <Slide2Dataset />
+  <Slide3Quality />
+  <Slide4Arch />
+  <Slide5Demo />
+</Deck>
