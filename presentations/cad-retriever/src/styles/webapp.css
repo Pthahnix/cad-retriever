@@ -1,0 +1,44 @@
+/* Web-app styles, scoped so they never leak into deck chrome. */
+#demo-slide { --panel:#0f2236; --line:#1e3a52; --muted:#8aa3b5; color: var(--text); }
+
+#demo-slide .topbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.25rem; }
+#demo-slide .topbar h1 { font-size: 1.2rem; margin: 0; white-space: nowrap; color: var(--text); }
+#demo-slide .searchbox { flex: 1; display: flex; gap: .4rem; align-items: center;
+  border: 1px solid var(--line); border-radius: 8px; padding: .3rem .3rem .3rem .7rem; background: rgba(255,255,255,.03); }
+#demo-slide .searchbox:focus-within { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13,110,120,.25); }
+#demo-slide .searchbox input[type="text"] { flex: 1; border: none; font: inherit; outline: none; background: none; color: var(--text); }
+#demo-slide .searchbox input[type="text"]::placeholder { color: var(--muted); }
+#demo-slide .upload-btn { display: grid; place-items: center; width: 30px; height: 30px;
+  border: none; background: none; border-radius: 6px; cursor: pointer; color: var(--muted); }
+#demo-slide .upload-btn:hover { background: rgba(13,110,120,.18); color: var(--teal); }
+#demo-slide .upload-btn svg { width: 18px; height: 18px; }
+#demo-slide .divider { width: 1px; align-self: stretch; background: var(--line); margin: .15rem .1rem; }
+#demo-slide .mode-tag { font-size: .72rem; color: var(--muted); padding: 0 .4rem; white-space: nowrap; }
+#demo-slide .go-btn { font: inherit; background: var(--teal); color: #fff; border: none; border-radius: 6px; padding: .4rem 1rem; cursor: pointer; transition: background .15s; }
+#demo-slide .go-btn:hover { background: var(--rust); }
+#demo-slide .attach { display: none; align-items: center; gap: .4rem; margin-bottom: 1rem; font-size: .8rem; color: var(--muted); }
+#demo-slide .attach.show { display: flex; }
+#demo-slide .attach img { width: 36px; height: 36px; object-fit: cover; border-radius: 6px; border: 1px solid var(--teal); }
+#demo-slide .attach .x { border: none; background: none; cursor: pointer; color: var(--rust); font-size: 1rem; line-height: 1; }
+#demo-slide .status { color: var(--amber); font-size: 0.85rem; margin: 0 0 1rem; }
+#demo-slide .results { width: 100%; border-collapse: collapse; font-size: .85rem; transition: opacity 0.2s; }
+#demo-slide .results thead tr { text-align: left; color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; border-bottom: 2px solid var(--line); }
+#demo-slide .results th { padding: .6rem .5rem; }
+#demo-slide .results tbody tr { border-bottom: 1px solid var(--line); cursor: pointer; }
+#demo-slide .results tbody tr:hover { background: rgba(13,110,120,.12); }
+#demo-slide .results td { padding: .45rem .5rem; }
+#demo-slide .score { font-weight: 700; color: var(--amber); }
+#demo-slide .flag { font-size: .7rem; background: rgba(200,48,10,.18); color: var(--rust); border-radius: 4px; padding: .1rem .45rem; }
+#demo-slide .dash { color: var(--muted); }
+#demo-slide .thumb { width: 48px; height: 48px; border-radius: 6px; background: var(--panel); object-fit: contain; display: block; border: 1px solid var(--line); }
+
+/* modal is fixed/full-viewport: scope by id but keep it above the deck */
+.modal { position: fixed; inset: 0; display: grid; place-items: center; z-index: 100; }
+.modal[hidden] { display: none; }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.65); }
+.modal-body { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1.25rem; max-width: 560px; width: 90%; }
+.modal-close { position: absolute; top: 0.5rem; right: 0.75rem; border: none; background: none; font-size: 1.5rem; cursor: pointer; color: var(--text); }
+.viewer-canvas { width: 100%; min-height: 360px; background: #0b1b2b; border-radius: 6px; border: 1px solid var(--teal); }
+.viewer-caption { margin: 0.75rem 0 0.5rem; font-size: 0.95rem; color: var(--text); }
+.viewer-meta { display: flex; gap: 0.5rem; font-size: 0.75rem; color: var(--muted); }
+.viewer-meta span { background: rgba(13,110,120,.18); color: var(--teal); border-radius: 999px; padding: 0.1rem 0.6rem; }

@@ -1,0 +1,20 @@
+---
+import ModelCard from "./ModelCard.astro";
+import models from "../../data/models.json";
+---
+<table class="results">
+  <thead>
+    <tr>
+      <th style="width:64px;"></th>
+      <th>Caption</th>
+      <th style="width:70px;">Score</th>
+      <th style="width:70px;">Faces</th>
+      <th style="width:60px;">Solids</th>
+      <th style="width:80px;">Flags</th>
+    </tr>
+  </thead>
+  <tbody>
+    {models.map((m) => <ModelCard {...m} />)}
+  </tbody>
+</table>
+<script src="../../scripts/webapp/thumbs.ts"></script>

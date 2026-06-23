@@ -1,0 +1,37 @@
+[
+  {
+    "id": "demo/0001",
+    "caption": "a flat cylindrical disc with a central through-hole and six evenly spaced mounting holes",
+    "shape": "disc",
+    "score": 0.94,
+    "probe": { "n_faces": 16, "n_solids": 1, "bbox_ratio": 10.0, "quality_flags": [] }
+  },
+  {
+    "id": "demo/0002",
+    "caption": "an L-shaped mounting bracket with two perpendicular flat arms",
+    "shape": "bracket",
+    "score": 0.89,
+    "probe": { "n_faces": 12, "n_solids": 1, "bbox_ratio": 6.3, "quality_flags": [] }
+  },
+  {
+    "id": "demo/0003",
+    "caption": "a hexagonal nut with a central circular bore",
+    "shape": "nut",
+    "score": 0.85,
+    "probe": { "n_faces": 9, "n_solids": 1, "bbox_ratio": 3.0, "quality_flags": [] }
+  },
+  {
+    "id": "demo/0004",
+    "caption": "a stepped cylindrical shaft with two coaxial diameters",
+    "shape": "shaft",
+    "score": 0.81,
+    "probe": { "n_faces": 6, "n_solids": 1, "bbox_ratio": 4.7, "quality_flags": [] }
+  },
+  {
+    "id": "demo/0005",
+    "caption": "a rectangular base plate reinforced with three parallel ribs",
+    "shape": "plate",
+    "score": 0.76,
+    "probe": { "n_faces": 30, "n_solids": 1, "bbox_ratio": 13.3, "quality_flags": [] }
+  }
+]

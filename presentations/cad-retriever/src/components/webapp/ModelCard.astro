@@ -1,0 +1,18 @@
+---
+interface Props {
+  id: string;
+  caption: string;
+  shape: string;
+  score: number;
+  probe: { n_faces: number; n_solids: number; bbox_ratio: number; quality_flags: string[] };
+}
+const { id, caption, shape, score, probe } = Astro.props;
+---
+<tr class="model-card" data-model-id={id}>
+  <td><img class="thumb" data-shape={shape} alt="" aria-hidden="true" /></td>
+  <td>{caption}</td>
+  <td class="score">{score.toFixed(2)}</td>
+  <td>{probe.n_faces}</td>
+  <td>{probe.n_solids}</td>
+  <td>{probe.quality_flags.length ? <span class="flag">⚠</span> : <span class="dash">—</span>}</td>
+</tr>
