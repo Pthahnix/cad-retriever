@@ -1,0 +1,82 @@
+---
+import Pill from "../ui/Pill.astro";
+import Card from "../ui/Card.astro";
+import CodeBlock from "../ui/CodeBlock.astro";
+import StatBar from "../ui/StatBar.astro";
+const renderStack = `STEP → Blender headless 加载 → 居中 + 归一化缩放
+   → 30 相机位 (10 方位角 × 3 仰角) → EEVEE GPU 渲染
+   → 224×224 JPEG q90 彩色图 × 30`;
+const annoPrompt = `Describe this CAD part's geometry in one sentence.
+Focus on shape, structure, and key features (holes, threads, flanges).
+Example: a flat cylindrical disc with a central through-hole
+and six evenly spaced mounting holes.`;
+---
+<section class="deck-section">
+  <Pill label="Pipeline · ABC Dataset" />
+  <h2 class="section-title">Dataset Preprocessing</h2>
+  <p>
+    数据来自 <strong>ABC Dataset</strong>（Koch et al., CVPR 2019）：
+    约 <strong>1M STEP</strong> 文件、~500GB，解压建议预留 700GB。
+    预处理把每个 CAD 模型变成可训练的三模态样本：多视角渲染图、草图、文本描述。
+  </p>
+
+  <div class="flow">
+    <div class="flow-step"><div>Multi-view Rendering</div><div class="when">~60h</div></div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step"><div>Sketch Generation</div><div class="when">~144h</div></div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step"><div>Text Annotation</div><div class="when">~16h</div></div>
+  </div>
+
+  <h3>① Multi-view Rendering</h3>
+  <p class="muted">Blender headless + EEVEE GPU，逐视角渲染。30-view = 10 方位角 × 3 仰角。</p>
+  <div class="fig-grid cols-2">
+    <div>
+      <div class="view-ring" id="view-ring"><div class="center">10 方位角<br/>× 3 仰角</div></div>
+      <div class="elev-legend">
+        <span style="--d:var(--teal)">仰角 15°</span>
+        <span style="color:var(--amber)">35°</span>
+        <span style="color:var(--rust)">60°</span>
+      </div>
+    </div>
+    <div>
+      <CodeBlock code={renderStack} />
+      <p class="muted">输出：224×224 JPEG q90，1M × 30 = <strong>30M</strong> 图像，~625GB。</p>
+    </div>
+  </div>
+
+  <h3>② Sketch Generation</h3>
+  <p class="muted">从 30-view 抽 6-view，提 lineart 作 ControlNet 条件，SDXL-Lightning 4-step 生成灰度草图。</p>
+  <div class="fig-grid cols-3">
+    <Card accent="teal"><h3>SDXL-Lightning</h3><p class="muted">HF ByteDance/SDXL-Lightning（4-step UNet）</p></Card>
+    <Card accent="rust"><h3>ControlNet Lineart</h3><p class="muted">HF xinsir/controlnet-scribble-sdxl-1.0</p></Card>
+    <Card accent="amber"><h3>Lineart 预处理</h3><p class="muted">controlnet_aux LineartDetector</p></Card>
+  </div>
+  <p class="muted">输出：1M × 6 = <strong>6M</strong> 灰度 JPEG，~40GB。</p>
+
+  <h3>③ Text Annotation</h3>
+  <p class="muted">Qwen3.6-27B（multi-image input，吃全部 30 视角）产出 shape-centric caption，风格参考 NURBGen partABC（~300K captions, arXiv 2511.06194）。27B fp16 ~54GB，需双卡。</p>
+  <CodeBlock code={annoPrompt} />
+  <p class="muted">输出：1M JSON，~1GB。</p>
+
+  <h2 class="section-title">耗时对比（1× RTX 5090，标注阶段 2×）</h2>
+  <StatBar label="Multi-view Rendering" value={60} max={144} unit="h" accent="teal" />
+  <StatBar label="Sketch Generation" value={144} max={144} unit="h" accent="rust" />
+  <StatBar label="Text Annotation" value={16} max={144} unit="h" accent="amber" />
+
+  <script>
+    // place 10 azimuth dots around the ring
+    const ring = document.getElementById("view-ring");
+    if (ring) {
+      const R = 100, C = 110;
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+        const dot = document.createElement("div");
+        dot.className = "view-dot";
+        dot.style.left = `${C + R * Math.cos(a)}px`;
+        dot.style.top = `${C + R * Math.sin(a)}px`;
+        ring.appendChild(dot);
+      }
+    }
+  </script>
+</section>
