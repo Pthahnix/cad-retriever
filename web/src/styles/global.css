@@ -43,13 +43,8 @@ body { margin: 0 auto; padding: 2rem; max-width: 1000px; }
 .flag { font-size: .7rem; background: #fde2e2; color: #a33; border-radius: 4px; padding: .1rem .45rem; }
 .dash { color: #bcc7cf; }
 
-/* ---------- thumbnails (CSS placeholders) ---------- */
-.thumb { width: 48px; height: 48px; border-radius: 6px; }
-.thumb-disc    { background: radial-gradient(circle at 50% 50%, #8fb0c8 0 38%, #b9cdda 40% 100%); }
-.thumb-bracket { background: linear-gradient(135deg, #c2d3df, #6f93ac); }
-.thumb-nut     { background: conic-gradient(from 30deg, #7c9cb5 0 16.6%, #aec3d3 0 33.3%, #7c9cb5 0 50%, #aec3d3 0 66.6%, #7c9cb5 0 83.3%, #aec3d3 0 100%); }
-.thumb-shaft   { background: linear-gradient(90deg, #b9cdda 0 32%, #7c9cb5 32% 68%, #b9cdda 68%); }
-.thumb-plate   { background: repeating-linear-gradient(90deg, #7c9cb5 0 9px, #c2d3df 9px 22px); }
+/* ---------- thumbnails (rendered from shapes.ts at load) ---------- */
+.thumb { width: 48px; height: 48px; border-radius: 6px; background: #eef2f5; object-fit: contain; display: block; }
 
 /* ---------- viewer modal ---------- */
 .modal { position: fixed; inset: 0; display: grid; place-items: center; z-index: 10; }

@@ -9,7 +9,7 @@ interface Props {
 const { id, caption, shape, score, probe } = Astro.props;
 ---
 <tr class="model-card" data-model-id={id}>
-  <td><div class={`thumb thumb-${shape}`} aria-hidden="true"></div></td>
+  <td><img class="thumb" data-shape={shape} alt="" aria-hidden="true" /></td>
   <td>{caption}</td>
   <td class="score">{score.toFixed(2)}</td>
   <td>{probe.n_faces}</td>
