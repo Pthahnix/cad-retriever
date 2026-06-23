@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CAD Retriever — UI Mockups</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #0c0e12;
+    color: #e8edf2;
+    overflow: hidden;
+  }
+
+  /* ---------- mockup stage ---------- */
+  .stage { position: fixed; inset: 0 0 56px 0; overflow: hidden; }
+  .deck { display: flex; height: 100%; transition: transform .35s cubic-bezier(.4,0,.2,1); }
+  .slide { min-width: 100%; height: 100%; overflow-y: auto; }
+  .frame { min-height: 100%; }
+
+  /* ---------- nav bar ---------- */
+  .nav {
+    position: fixed; bottom: 0; left: 0; right: 0; height: 56px;
+    display: flex; align-items: center; justify-content: center; gap: 1.5rem;
+    background: #15181e; border-top: 1px solid #262b33; z-index: 100;
+    font-size: .85rem;
+  }
+  .nav button {
+    font: inherit; background: #232831; color: #e8edf2; border: 1px solid #333b46;
+    border-radius: 6px; padding: .4rem .9rem; cursor: pointer;
+  }
+  .nav button:hover { background: #2c333e; }
+  .nav .label { min-width: 220px; text-align: center; color: #9fb0c0; }
+  .nav .label b { color: #fff; }
+  .dots { display: flex; gap: .4rem; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #3a424d; cursor: pointer; }
+  .dot.on { background: #4a9eff; }
+  kbd { background: #232831; border: 1px solid #333b46; border-radius: 4px; padding: 0 .35rem; font-size: .75rem; }
+
+  /* ================= shared demo bits ================= */
+  .thumb { aspect-ratio: 1; border-radius: 8px; position: relative; overflow: hidden; }
+  .t-disc    { background: radial-gradient(circle at 50% 50%, #8fb0c8 0 38%, #b9cdda 40% 100%); }
+  .t-bracket { background: linear-gradient(135deg, #c2d3df, #6f93ac); }
+  .t-nut     { background: conic-gradient(from 30deg, #7c9cb5 0 16.6%, #aec3d3 0 33.3%, #7c9cb5 0 50%, #aec3d3 0 66.6%, #7c9cb5 0 83.3%, #aec3d3 0 100%); }
+  .t-shaft   { background: linear-gradient(90deg, #b9cdda 0 32%, #7c9cb5 32% 68%, #b9cdda 68%); }
+  .t-plate   { background: repeating-linear-gradient(90deg, #7c9cb5 0 9px, #c2d3df 9px 22px); }
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <div class="deck" id="deck">
+
+    <!-- ============================================================= -->
+    <!-- SLIDE 1 — "Refined Light"  (现状的打磨版) -->
+    <!-- ============================================================= -->
+    <section class="slide">
+      <div class="frame" style="background:#f4f6f8;color:#1a2530;font-family:system-ui,sans-serif;">
+        <div style="max-width:1040px;margin:0 auto;padding:2.5rem 2rem;">
+          <header style="display:flex;align-items:baseline;gap:.75rem;margin-bottom:1.75rem;">
+            <h1 style="font-size:1.5rem;margin:0;letter-spacing:-.02em;">CAD Retriever</h1>
+            <span style="font-size:.8rem;color:#8395a3;">基于描述检索 3D 零件</span>
+          </header>
+
+          <div style="background:#fff;border:1px solid #dde3e8;border-radius:12px;padding:1rem;margin-bottom:1.5rem;box-shadow:0 1px 3px rgba(20,40,60,.04);">
+            <div style="display:flex;gap:.4rem;margin-bottom:.75rem;">
+              <button style="font:inherit;padding:.35rem .9rem;border:none;background:#1a2530;color:#fff;border-radius:999px;cursor:pointer;">Text</button>
+              <button style="font:inherit;padding:.35rem .9rem;border:1px solid #dde3e8;background:#fff;color:#5a6b78;border-radius:999px;cursor:pointer;">Sketch</button>
+              <button style="font:inherit;padding:.35rem .9rem;border:1px solid #dde3e8;background:#fff;color:#5a6b78;border-radius:999px;cursor:pointer;">Image</button>
+            </div>
+            <div style="display:flex;gap:.5rem;">
+              <input type="text" value="flat disc with mounting holes" style="flex:1;padding:.65rem .85rem;border:1px solid #c7d0d8;border-radius:8px;font:inherit;" />
+              <button style="padding:.65rem 1.6rem;border:none;background:#2a7;color:#fff;border-radius:8px;cursor:pointer;font:inherit;font-weight:600;">Search</button>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.8rem;">
+              <span style="font-size:.75rem;background:#eef2f5;border:1px solid #dde3e8;border-radius:999px;padding:.2rem .7rem;color:#5a6b78;">L-shaped bracket</span>
+              <span style="font-size:.75rem;background:#eef2f5;border:1px solid #dde3e8;border-radius:999px;padding:.2rem .7rem;color:#5a6b78;">hex nut</span>
+              <span style="font-size:.75rem;background:#eef2f5;border:1px solid #dde3e8;border-radius:999px;padding:.2rem .7rem;color:#5a6b78;">stepped shaft</span>
+            </div>
+          </div>
+
+          <p style="font-size:.85rem;color:#8395a3;margin:0 0 1rem;">5 个结果 · 按相似度排序</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1.25rem;" id="grid1"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================= -->
+    <!-- SLIDE 2 — "Dark Workstation"  (工程暗色 / 等宽) -->
+    <!-- ============================================================= -->
+    <section class="slide">
+      <div class="frame" style="background:#0e1116;color:#cdd6e0;font-family:'SF Mono',ui-monospace,'Cascadia Code',Consolas,monospace;">
+        <div style="max-width:1100px;margin:0 auto;padding:2.5rem 2rem;">
+          <header style="display:flex;align-items:center;gap:.6rem;margin-bottom:1.5rem;">
+            <div style="width:10px;height:10px;border-radius:2px;background:#4a9eff;"></div>
+            <h1 style="font-size:1.1rem;margin:0;font-weight:600;letter-spacing:.04em;">cad-retriever</h1>
+            <span style="font-size:.72rem;color:#5d6b7a;margin-left:auto;">v0.1 · index: 12,480 parts</span>
+          </header>
+
+          <div style="display:flex;gap:.5rem;align-items:center;background:#161b22;border:1px solid #2a3340;border-radius:8px;padding:.5rem .6rem;margin-bottom:.6rem;">
+            <span style="color:#4a9eff;">&gt;</span>
+            <input type="text" value="flat disc with mounting holes" style="flex:1;background:none;border:none;color:#cdd6e0;font:inherit;outline:none;" />
+            <span style="font-size:.7rem;color:#5d6b7a;">text ▾</span>
+            <button style="font:inherit;background:#4a9eff;color:#0e1116;border:none;border-radius:5px;padding:.3rem .8rem;cursor:pointer;font-weight:600;">run</button>
+          </div>
+          <div style="font-size:.72rem;color:#5d6b7a;margin-bottom:1.5rem;">query → CLIP embed → ANN search · 38ms · 5 hits</div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;" id="grid2"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================= -->
+    <!-- SLIDE 3 — "Sidebar + Filters"  (左栏检索 / 右栏结果) -->
+    <!-- ============================================================= -->
+    <section class="slide">
+      <div class="frame" style="background:#f7f8fa;color:#1a2530;font-family:system-ui,sans-serif;display:flex;min-height:100%;">
+        <aside style="width:280px;flex-shrink:0;background:#fff;border-right:1px solid #e3e8 ec;padding:1.5rem 1.25rem;">
+          <h1 style="font-size:1.15rem;margin:0 0 1.5rem;letter-spacing:-.02em;">CAD Retriever</h1>
+
+          <label style="font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:#9aa7b2;">Query</label>
+          <div style="display:flex;gap:.3rem;margin:.4rem 0 .5rem;">
+            <button style="flex:1;font:inherit;font-size:.78rem;padding:.35rem;border:none;background:#1a2530;color:#fff;border-radius:6px;cursor:pointer;">Text</button>
+            <button style="flex:1;font:inherit;font-size:.78rem;padding:.35rem;border:1px solid #dde3e8;background:#fff;border-radius:6px;cursor:pointer;">Sketch</button>
+            <button style="flex:1;font:inherit;font-size:.78rem;padding:.35rem;border:1px solid #dde3e8;background:#fff;border-radius:6px;cursor:pointer;">Img</button>
+          </div>
+          <textarea style="width:100%;height:64px;padding:.55rem;border:1px solid #c7d0d8;border-radius:8px;font:inherit;font-size:.85rem;resize:none;">flat disc with mounting holes</textarea>
+          <button style="width:100%;margin-top:.5rem;padding:.6rem;border:none;background:#2a7;color:#fff;border-radius:8px;font:inherit;font-weight:600;cursor:pointer;">Search</button>
+
+          <div style="border-top:1px solid #eef2f5;margin:1.5rem 0;"></div>
+          <label style="font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:#9aa7b2;">Filters</label>
+          <div style="margin-top:.7rem;font-size:.85rem;display:flex;flex-direction:column;gap:.55rem;color:#3d4d5a;">
+            <label style="display:flex;align-items:center;gap:.5rem;"><input type="checkbox" checked> 单实体 (solids = 1)</label>
+            <label style="display:flex;align-items:center;gap:.5rem;"><input type="checkbox"> 隐藏含质量警告</label>
+            <label style="display:flex;align-items:center;gap:.5rem;"><input type="checkbox"> 仅带孔特征</label>
+          </div>
+          <label style="display:block;margin-top:1rem;font-size:.8rem;color:#3d4d5a;">最低相似度 0.70</label>
+          <input type="range" min="0" max="100" value="70" style="width:100%;margin-top:.3rem;">
+        </aside>
+
+        <main style="flex:1;padding:1.75rem 2rem;">
+          <div style="display:flex;align-items:center;margin-bottom:1.25rem;">
+            <p style="margin:0;font-size:.85rem;color:#8395a3;">5 个结果</p>
+            <span style="margin-left:auto;font-size:.8rem;color:#5a6b78;">排序：相似度 ▾</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:1.1rem;" id="grid3"></div>
+        </main>
+      </div>
+    </section>
+
+    <!-- ============================================================= -->
+    <!-- SLIDE 4 — "Editorial / Spacious"  (大图留白) -->
+    <!-- ============================================================= -->
+    <section class="slide">
+      <div class="frame" style="background:#fbfaf7;color:#23201a;font-family:'Georgia',serif;">
+        <div style="max-width:920px;margin:0 auto;padding:3.5rem 2rem;">
+          <h1 style="font-size:2.2rem;margin:0 0 .3rem;font-weight:500;letter-spacing:-.02em;">CAD Retriever</h1>
+          <p style="margin:0 0 2rem;color:#8a8275;font-size:1rem;font-style:italic;">用自然语言找到正确的零件</p>
+
+          <div style="display:flex;border-bottom:2px solid #23201a;padding-bottom:.5rem;gap:.5rem;align-items:center;margin-bottom:.75rem;">
+            <input type="text" value="flat disc with mounting holes" style="flex:1;border:none;background:none;font:inherit;font-size:1.25rem;outline:none;color:#23201a;" />
+            <button style="font-family:system-ui;font-size:.85rem;background:#23201a;color:#fbfaf7;border:none;border-radius:999px;padding:.45rem 1.3rem;cursor:pointer;">检索 →</button>
+          </div>
+          <div style="font-family:system-ui;font-size:.8rem;color:#a59c8c;margin-bottom:2.5rem;">Text · Sketch · Image</div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:2.5rem 2rem;" id="grid4"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================= -->
+    <!-- SLIDE 5 — "Dense List / Power"  (紧凑表格) -->
+    <!-- ============================================================= -->
+    <section class="slide">
+      <div class="frame" style="background:#fff;color:#1a2530;font-family:system-ui,sans-serif;">
+        <div style="max-width:1000px;margin:0 auto;padding:2rem;">
+          <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem;">
+            <h1 style="font-size:1.2rem;margin:0;">CAD Retriever</h1>
+            <div style="flex:1;display:flex;gap:.4rem;align-items:center;border:1px solid #d4dce2;border-radius:8px;padding:.3rem .3rem .3rem .7rem;">
+              <input type="text" value="flat disc with mounting holes" style="flex:1;border:none;font:inherit;outline:none;" />
+              <span style="font-size:.72rem;color:#8395a3;border-right:1px solid #e3e8ec;padding-right:.5rem;">Text</span>
+              <button style="font:inherit;background:#2a7;color:#fff;border:none;border-radius:6px;padding:.35rem 1rem;cursor:pointer;">Go</button>
+            </div>
+          </div>
+
+          <table style="width:100%;border-collapse:collapse;font-size:.85rem;">
+            <thead>
+              <tr style="text-align:left;color:#8395a3;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;border-bottom:2px solid #eef2f5;">
+                <th style="padding:.6rem .5rem;width:64px;"></th>
+                <th style="padding:.6rem .5rem;">Caption</th>
+                <th style="padding:.6rem .5rem;width:70px;">Score</th>
+                <th style="padding:.6rem .5rem;width:70px;">Faces</th>
+                <th style="padding:.6rem .5rem;width:60px;">Solids</th>
+                <th style="padding:.6rem .5rem;width:80px;">Flags</th>
+              </tr>
+            </thead>
+            <tbody id="rows5"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<!-- ---------- nav ---------- -->
+<div class="nav">
+  <button id="prev">← Prev</button>
+  <div class="dots" id="dots"></div>
+  <span class="label"><b id="pgnum">1</b> / 5 · <span id="pgname">Refined Light</span></span>
+  <button id="next">Next →</button>
+  <span style="color:#5d6b7a;">用 <kbd>←</kbd> <kbd>→</kbd> 翻页</span>
+</div>
+
+<script>
+const MODELS = [
+  { id:"demo/0001", caption:"a flat cylindrical disc with a central through-hole and six evenly spaced mounting holes", shape:"disc",    score:0.94, probe:{n_faces:16,n_solids:1,quality_flags:[]} },
+  { id:"demo/0002", caption:"an L-shaped mounting bracket with two perpendicular flat arms",                          shape:"bracket", score:0.89, probe:{n_faces:12,n_solids:1,quality_flags:[]} },
+  { id:"demo/0003", caption:"a hexagonal nut with a central circular bore",                                          shape:"nut",     score:0.85, probe:{n_faces:9, n_solids:1,quality_flags:["non-watertight"]} },
+  { id:"demo/0004", caption:"a stepped cylindrical shaft with two coaxial diameters",                                shape:"shaft",   score:0.81, probe:{n_faces:6, n_solids:1,quality_flags:[]} },
+  { id:"demo/0005", caption:"a rectangular base plate reinforced with three parallel ribs",                          shape:"plate",   score:0.76, probe:{n_faces:30,n_solids:1,quality_flags:[]} },
+];
+const PAGES = ["Refined Light","Dark Workstation","Sidebar + Filters","Editorial","Dense List"];
+
+// ---- card renderers (one per slide style) ----
+function card1(m){return `<button style="text-align:left;background:#fff;border:1px solid #dde3e8;border-radius:12px;padding:.75rem;cursor:pointer;font:inherit;box-shadow:0 1px 3px rgba(20,40,60,.04);">
+  <div class="thumb t-${m.shape}"></div>
+  <p style="font-size:.85rem;margin:.6rem 0 .5rem;line-height:1.35;color:#1a2530;">${m.caption}</p>
+  <div style="display:flex;flex-wrap:wrap;gap:.3rem;align-items:center;">
+    <span style="font-weight:700;color:#2a7;">${m.score.toFixed(2)}</span>
+    <span style="font-size:.7rem;background:#eef2f5;border-radius:4px;padding:.1rem .45rem;color:#5a6b78;">${m.probe.n_faces} faces</span>
+    ${m.probe.quality_flags.map(f=>`<span style="font-size:.7rem;background:#fde2e2;color:#a33;border-radius:4px;padding:.1rem .45rem;">${f}</span>`).join("")}
+  </div></button>`;}
+
+function card2(m){return `<button style="text-align:left;background:#161b22;border:1px solid #2a3340;border-radius:8px;padding:.6rem;cursor:pointer;font:inherit;color:#cdd6e0;">
+  <div class="thumb t-${m.shape}" style="border-radius:5px;"></div>
+  <div style="display:flex;justify-content:space-between;margin:.55rem 0 .4rem;font-size:.72rem;">
+    <span style="color:#5d6b7a;">${m.id}</span><span style="color:#4a9eff;font-weight:700;">${m.score.toFixed(2)}</span>
+  </div>
+  <p style="font-size:.78rem;margin:0 0 .5rem;line-height:1.3;color:#9fb0c0;font-family:system-ui;">${m.caption}</p>
+  <div style="display:flex;gap:.3rem;font-size:.68rem;color:#5d6b7a;">
+    <span>f:${m.probe.n_faces}</span><span>s:${m.probe.n_solids}</span>
+    ${m.probe.quality_flags.map(f=>`<span style="color:#e0a04a;">⚠ ${f}</span>`).join("")}
+  </div></button>`;}
+
+function card3(m){return `<button style="text-align:left;background:#fff;border:1px solid #e3e8ec;border-radius:10px;padding:.65rem;cursor:pointer;font:inherit;">
+  <div class="thumb t-${m.shape}"></div>
+  <p style="font-size:.8rem;margin:.55rem 0 .45rem;line-height:1.35;color:#1a2530;">${m.caption}</p>
+  <div style="display:flex;gap:.3rem;align-items:center;">
+    <span style="font-weight:700;color:#2a7;font-size:.85rem;">${m.score.toFixed(2)}</span>
+    <span style="font-size:.68rem;background:#eef2f5;border-radius:4px;padding:.1rem .4rem;color:#5a6b78;">${m.probe.n_faces}f</span>
+    ${m.probe.quality_flags.map(f=>`<span style="font-size:.68rem;background:#fde2e2;color:#a33;border-radius:4px;padding:.1rem .4rem;">⚠</span>`).join("")}
+  </div></button>`;}
+
+function card4(m){return `<figure style="margin:0;cursor:pointer;">
+  <div class="thumb t-${m.shape}" style="border-radius:4px;box-shadow:0 4px 18px rgba(35,32,26,.12);"></div>
+  <figcaption style="margin-top:.85rem;">
+    <div style="display:flex;align-items:baseline;gap:.6rem;"><span style="font-family:system-ui;font-size:.75rem;color:#a59c8c;">${m.id}</span><span style="margin-left:auto;font-family:system-ui;font-size:.8rem;color:#5a7a4a;">相似度 ${m.score.toFixed(2)}</span></div>
+    <p style="margin:.35rem 0 0;font-size:1.05rem;line-height:1.4;color:#23201a;">${m.caption}</p>
+  </figcaption></figure>`;}
+
+function row5(m){return `<tr style="border-bottom:1px solid #f0f3f5;cursor:pointer;">
+  <td style="padding:.45rem .5rem;"><div class="thumb t-${m.shape}" style="width:48px;height:48px;border-radius:6px;"></div></td>
+  <td style="padding:.45rem .5rem;color:#1a2530;">${m.caption}</td>
+  <td style="padding:.45rem .5rem;font-weight:700;color:#2a7;">${m.score.toFixed(2)}</td>
+  <td style="padding:.45rem .5rem;color:#5a6b78;">${m.probe.n_faces}</td>
+  <td style="padding:.45rem .5rem;color:#5a6b78;">${m.probe.n_solids}</td>
+  <td style="padding:.45rem .5rem;">${m.probe.quality_flags.length?`<span style="font-size:.7rem;background:#fde2e2;color:#a33;border-radius:4px;padding:.1rem .45rem;">⚠</span>`:`<span style="color:#bcc7cf;">—</span>`}</td></tr>`;}
+
+document.getElementById("grid1").innerHTML = MODELS.map(card1).join("");
+document.getElementById("grid2").innerHTML = MODELS.map(card2).join("");
+document.getElementById("grid3").innerHTML = MODELS.map(card3).join("");
+document.getElementById("grid4").innerHTML = MODELS.map(card4).join("");
+document.getElementById("rows5").innerHTML = MODELS.map(row5).join("");
+
+// ---- paging ----
+let i = 0;
+const deck = document.getElementById("deck");
+const dotsEl = document.getElementById("dots");
+PAGES.forEach((_,k)=>{const d=document.createElement("div");d.className="dot"+(k===0?" on":"");d.onclick=()=>go(k);dotsEl.appendChild(d);});
+function go(n){ i=(n+PAGES.length)%PAGES.length; deck.style.transform=`translateX(-${i*100}%)`;
+  document.getElementById("pgnum").textContent=i+1;
+  document.getElementById("pgname").textContent=PAGES[i];
+  [...dotsEl.children].forEach((d,k)=>d.classList.toggle("on",k===i)); }
+document.getElementById("prev").onclick=()=>go(i-1);
+document.getElementById("next").onclick=()=>go(i+1);
+addEventListener("keydown",e=>{ if(e.key==="ArrowLeft")go(i-1); if(e.key==="ArrowRight")go(i+1); });
+</script>
+</body>
+</html>
