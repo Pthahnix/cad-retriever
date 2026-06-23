@@ -1,0 +1,69 @@
+---
+import Pill from "../ui/Pill.astro";
+import CodeBlock from "../ui/CodeBlock.astro";
+const probeCode = `reader = STEPControl_Reader()
+if reader.ReadFile(step_path) != 1:
+    flag = "step_read_fail"
+explorer = TopExp_Explorer(shape, TopAbs_FACE)   # no BRepMesh
+n_faces = count(explorer)
+if n_faces > 5000:  flag = "too_complex"
+if n_faces < 3:     flag = "too_simple"`;
+---
+<section class="deck-section">
+  <Pill label="Preprocessing · Quality Gate" />
+  <h2 class="section-title">显式、廉价、可解释的质量门</h2>
+
+  <p>
+    上次执行渲染卡在 <strong>276K / 990K</strong>：剩余 STEP "太复杂渲染不动"，
+    被迫把训练阈值从 900K 硬降到 340K。换句话说，
+    <em>"能否在 30s 内 mesh 完"</em> 偷偷变成了筛选规则——一种不可控的隐式筛选。
+  </p>
+  <div class="pull-quote">
+    把质量筛选从渲染 timeout 的副产物，提前到渲染之前：变成显式、廉价、可解释、可复现的一步。
+  </div>
+  <p class="muted">
+    核心原则：在 mesh（BRepMesh，最贵且超时所在）之前，用便宜的拓扑探查预测哪些会爆炸，提前分流。
+    筛选<strong>不删除文件</strong>，只往 manifest 写 <code>quality_flags</code> 列——随时可查询、复核、判断是否误杀。
+  </p>
+
+  <h3>四阶段筛选（按成本递增）</h3>
+  <table class="data-table">
+    <thead><tr><th>阶段</th><th>成本</th><th>检测项</th><th>Flag</th></tr></thead>
+    <tbody>
+      <tr><td>1 · 元数据级</td><td>零解析</td><td>file_size &gt; 50MB / ≈0；ABC <code>*_features.yml</code></td><td><code>oversized</code> / <code>corrupt</code></td></tr>
+      <tr><td>2 · 拓扑探查</td><td>秒级，不 mesh</td><td>ReadFile≠1；n_faces&gt;5000 / &lt;3；n_solids==0；bbox 比&gt;1000:1</td><td><code>too_complex</code> / <code>too_simple</code> / <code>no_solid</code> / <code>degenerate</code></td></tr>
+      <tr><td>3 · 图像级</td><td>廉价（可选）</td><td>前景像素&lt;1%；视角间方差极低</td><td><code>blank_render</code> / <code>low_variance</code></td></tr>
+      <tr><td>4 · 语义去重</td><td>后期（CLIP）</td><td>余弦相似度近重复；多样性采样</td><td>dedup 标记</td></tr>
+    </tbody>
+  </table>
+
+  <h3>拓扑探查：筛选主力</h3>
+  <p class="muted">STEPControl_Reader + TopExp_Explorer，秒级遍历拓扑，<strong>完全不调 BRepMesh</strong>。</p>
+  <CodeBlock code={probeCode} lang="python" />
+
+  <h3>Manifest 新增列</h3>
+  <table class="data-table">
+    <thead><tr><th>列名</th><th>含义</th></tr></thead>
+    <tbody>
+      <tr><td><code>probe_n_faces</code></td><td>拓扑探查得到的面数</td></tr>
+      <tr><td><code>probe_n_solids</code></td><td>实体个数（装配体判定）</td></tr>
+      <tr><td><code>probe_bbox_ratio</code></td><td>包围盒长宽比（退化判定）</td></tr>
+      <tr><td><code>file_size_mb</code></td><td>文件大小（几何爆炸预判）</td></tr>
+      <tr><td><code>quality_flags</code></td><td>命中的筛选 flag 列表</td></tr>
+    </tbody>
+  </table>
+
+  <div class="pull-quote">
+    待拍板：检索面向<strong>零件级</strong>还是<strong>装配体级</strong>？这决定 <code style="color:var(--rust)">n_solids &gt; 1</code> 是噪声（筛掉）还是信号（慢速渲染队列特殊处理）。
+  </div>
+
+  <h3>筛选漏斗（最终数量待 probe 跑完定）</h3>
+  <div class="funnel">
+    <div class="funnel-row" style="width:100%">1,000K STEP 文件</div>
+    <div class="funnel-row" style="width:88%">元数据筛后</div>
+    <div class="funnel-row" style="width:72%">拓扑探查筛后</div>
+    <div class="funnel-row" style="width:66%">图像级筛后</div>
+    <div class="funnel-row illustrative" style="width:60%">render-eligible（示意值，非实测）</div>
+  </div>
+  <p class="muted">阈值看真实直方图定，而非拍脑袋的 340K。漏斗末端数字为示意，待 <code>probe.py</code> 首次跑完确定。</p>
+</section>
