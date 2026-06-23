@@ -7,6 +7,9 @@ type Model = (typeof models)[number];
 const byId = new Map<string, Model>(models.map((m) => [m.id, m]));
 
 const modal = document.querySelector<HTMLElement>("#viewer-modal")!;
+// Portal the modal to <body> so position:fixed resolves against the viewport,
+// not the transformed #deck-track ancestor (which would shift it ~250vh off-screen).
+document.body.appendChild(modal);
 const canvasHost = document.querySelector<HTMLElement>("#viewer-canvas")!;
 const captionEl = document.querySelector<HTMLElement>("#viewer-caption")!;
 const metaEl = document.querySelector<HTMLElement>("#viewer-meta")!;
