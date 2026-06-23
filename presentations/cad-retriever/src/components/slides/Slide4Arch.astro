@@ -1,0 +1,63 @@
+---
+import Pill from "../ui/Pill.astro";
+import Card from "../ui/Card.astro";
+import StatBar from "../ui/StatBar.astro";
+---
+<section class="deck-section">
+  <Pill label="System · Architecture" />
+  <h2 class="section-title">端到端多模态检索</h2>
+  <p class="muted">以下为<strong>计划/目标设计</strong>（非实测）：对比学习把三模态编码进共享空间，FAISS 做向量检索，前端渲染 3D 结果。</p>
+
+  <div>
+    <div class="arch-layer"><span class="layer-name">Frontend</span> — Astro + three.js 3D viewer（OrbitControls，实时 thumbnail 渲染）</div>
+    <div class="arch-sep">▲</div>
+    <div class="arch-layer"><span class="layer-name">Embedding Model</span> — Contrastive Learning：InfoNCE loss + hard negative mining</div>
+    <div class="arch-sep">▲</div>
+    <div class="arch-layer"><span class="layer-name">Backend</span> — FAISS 向量库（IVF / HNSW 索引）</div>
+    <div class="arch-sep">▲</div>
+    <div class="arch-layer"><span class="layer-name">Data</span> — ABC 1M 预处理（renders + sketches + captions）</div>
+  </div>
+
+  <h3>Contrastive Learning</h3>
+  <div class="fig-grid cols-2">
+    <Card accent="teal">
+      <h3>InfoNCE</h3>
+      <p class="muted">把匹配的 (模态A, 模态B) 拉近、不匹配推远：</p>
+      <p style="font-family:var(--font-serif);font-style:italic;color:var(--amber)">
+        L = −log [ exp(sim(q,k⁺)/τ) / Σ exp(sim(q,kᵢ)/τ) ]
+      </p>
+    </Card>
+    <Card accent="rust">
+      <h3>Hard Negative Mining</h3>
+      <p class="muted">挑选"看起来像但其实不同"的负样本进入分母，迫使模型学习细粒度几何差异，而非靠简单负样本偷懒。</p>
+    </Card>
+  </div>
+  <div class="modality" style="margin-top:.5rem">
+    <Card accent="teal"><h3>Text enc</h3></Card>
+    <div class="arch-sep">→</div>
+    <div class="modality-converge">Shared Latent Space</div>
+    <div class="arch-sep">←</div>
+    <Card accent="amber"><h3>Image / Sketch enc</h3></Card>
+  </div>
+
+  <h3>技术栈</h3>
+  <div class="fig-grid cols-2">
+    <Card><h3>Frontend</h3><p class="muted">Astro · three.js · OrbitControls · 客户端 thumbnail 渲染</p></Card>
+    <Card><h3>Backend</h3><p class="muted">FAISS（IVF/HNSW）· embedding 维度待定 · 亚秒级检索目标</p></Card>
+  </div>
+
+  <h3>数据流</h3>
+  <div class="flow">
+    <div class="flow-step">User input</div><div class="flow-arrow">→</div>
+    <div class="flow-step">Encode</div><div class="flow-arrow">→</div>
+    <div class="flow-step">Query FAISS</div><div class="flow-arrow">→</div>
+    <div class="flow-step">Top-K</div><div class="flow-arrow">→</div>
+    <div class="flow-step">Render 3D + meta</div>
+  </div>
+
+  <h3>性能目标（design targets，非实测）</h3>
+  <StatBar label="Embedding inference" value={50} max={500} unit="ms" accent="teal" />
+  <StatBar label="FAISS retrieval" value={100} max={500} unit="ms" accent="amber" />
+  <StatBar label="3D model loading" value={200} max={500} unit="ms" accent="rust" />
+  <StatBar label="Total latency (target)" value={500} max={500} unit="ms" accent="teal" />
+</section>
