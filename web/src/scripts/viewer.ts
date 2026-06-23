@@ -40,7 +40,7 @@ function open(model: Model) {
     const w = canvasHost.clientWidth || 480;
     const h = 360;
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf4f6f8);
+    scene.background = new THREE.Color(0x0b1b2b);
     const camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 5000);
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(w, h);
