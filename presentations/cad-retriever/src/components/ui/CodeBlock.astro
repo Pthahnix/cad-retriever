@@ -1,0 +1,13 @@
+---
+interface Props { code: string; lang?: string; }
+const { code, lang = "" } = Astro.props;
+---
+<pre class="deck-code" data-lang={lang}><code>{code}</code></pre>
+<style>
+  .deck-code {
+    background: #08111d; border: 1px solid var(--line); border-left: 3px solid var(--teal);
+    border-radius: 8px; padding: 1rem 1.1rem; overflow-x: auto;
+    font-family: "Fira Code", Consolas, monospace; font-size: .85rem; line-height: 1.6;
+    color: #cfe3ec;
+  }
+</style>

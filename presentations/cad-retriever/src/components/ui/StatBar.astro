@@ -1,0 +1,17 @@
+---
+interface Props { label: string; value: number; max: number; unit?: string; accent?: "teal"|"rust"|"amber"; }
+const { label, value, max, unit = "", accent = "teal" } = Astro.props;
+const pct = Math.max(0, Math.min(100, (value / max) * 100));
+const color = { teal: "var(--teal)", rust: "var(--rust)", amber: "var(--amber)" }[accent];
+---
+<div class="statbar">
+  <div class="statbar-head"><span>{label}</span><span class="statbar-val">{value}{unit}</span></div>
+  <div class="statbar-track"><div class="statbar-fill" style={`width:${pct}%;background:${color}`}></div></div>
+</div>
+<style>
+  .statbar { margin: .6rem 0; }
+  .statbar-head { display: flex; justify-content: space-between; font-size: .85rem; margin-bottom: .25rem; }
+  .statbar-val { color: var(--amber); font-weight: 700; }
+  .statbar-track { height: 10px; background: rgba(255,255,255,.06); border-radius: 999px; overflow: hidden; }
+  .statbar-fill { height: 100%; border-radius: 999px; }
+</style>

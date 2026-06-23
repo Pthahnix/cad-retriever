@@ -1,0 +1,18 @@
+---
+interface Props { accent?: "teal" | "rust" | "amber"; }
+const { accent = "teal" } = Astro.props;
+const color = { teal: "var(--teal)", rust: "var(--rust)", amber: "var(--amber)" }[accent];
+---
+<div class="deck-card" style={`--card-accent:${color}`}>
+  <slot />
+</div>
+<style>
+  .deck-card {
+    background: rgba(255,255,255,.03);
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--card-accent);
+    border-radius: 12px; padding: 1.25rem 1.4rem;
+    box-shadow: 0 8px 30px rgba(0,0,0,.35);
+  }
+  .deck-card :global(h3) { margin-top: 0; }
+</style>
