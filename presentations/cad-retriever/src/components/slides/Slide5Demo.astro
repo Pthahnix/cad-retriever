@@ -1,0 +1,26 @@
+---
+import Pill from "../ui/Pill.astro";
+import SearchBar from "../webapp/SearchBar.astro";
+import ResultsGrid from "../webapp/ResultsGrid.astro";
+import ViewerModal from "../webapp/ViewerModal.astro";
+import "../../styles/webapp.css";
+---
+<section class="deck-section" style="--wash-a:rgba(13,110,120,.18);--wash-b:rgba(10,26,46,0)">
+  <Pill label="Live Demo · Interactive" />
+  <h2 class="section-title">实机展示</h2>
+  <p class="muted">
+    试试三种检索模式：在搜索框输入描述，或点击图标上传草图 / 参考图。
+    点任意结果行打开 3D viewer（鼠标拖动旋转）。
+    <span style="color:var(--amber)">演示数据为 5 个固定 demo 模型。</span>
+  </p>
+
+  <div id="demo-slide">
+    <SearchBar />
+    <ResultsGrid />
+    <ViewerModal />
+  </div>
+
+  <p class="muted" style="margin-top:1.5rem">
+    提示：在搜索框内打字时方向键不会翻页；3D viewer 打开时同样锁定翻页。关闭弹窗或点空白处即可恢复 ↑ ↓ 翻页。
+  </p>
+</section>
