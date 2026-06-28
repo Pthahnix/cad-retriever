@@ -391,7 +391,89 @@ Part 12 交付清单中的全部必交项均已完成并可验证，包括但不
 
 ## 2. 现状盘点
 
-> （本节由对应任务填充）
+### 2.1 代码资产（逐模块表）
+
+本系统的代码资产是一套完整可跑的双分支 sketch→CAD 实例检索代码库，托管于 Gitee `model-retrieval` 仓库。各模块职责如下：
+
+| 模块 | 文件 | 职责 |
+|------|------|------|
+| 训练入口 | `train.py` / `trainer.py` | 读取 config 展开超参、初始化模型与数据加载器、组装 loss、配置优化器与调度器、执行训练循环、按 epoch 存档 checkpoint |
+| 测试检索 | `test.py` / `inference.py` | 加载 checkpoint、对全库视图提取特征、构建 FAISS 索引、对查询草图提取特征后执行检索、计算并报告 Top-K 精度指标 |
+| 模型主干 | `model/Baseline/networks/baseline.py` | 定义双分支 `Baseline` 类（草图分支 + 视图分支共享 SE-ResNet50 骨架）；`baseline_step1`～`baseline_step5` 为渐进消融变体，逐步叠加 B-rep 图、跨模态注意力等组件 |
+| 草图/视图编码器 | `model/Baseline/networks/` 内 encoder 子模块 | 共享 SE-ResNet50 骨架提取单张图像特征；多视图路径采用 max-pool 将 `n_views` 帧特征聚合为单条描述子 |
+| B-rep 图编码器 | `model/Baseline/networks/complex_gnn.py` + `encoders/` | UV-Net 风格：对 B-rep 面/边的 UV-grid 采样特征分别建图、经 GNN 多轮消息传递后多聚合（mean/max/attention）输出固定维描述子；依赖外部预计算的 `graph*.pt` |
+| 可选组件 | `cross_attention.py` / `channel_grouping.py` / `feature_fusion.py` / `domain_discriminator.py` | 跨模态注意力（草图↔视图对齐）；通道分组关键区域加权；多视图特征融合；域对抗（梯度反转层，使编码器对 sketch/view 域无关） |
+| 损失函数 | `utils/loss.py` | `HardTripletMarginLoss`（V2 默认）；`InfoNCE`；`PairLoss`；`CorrLoss`；可按 config 组合叠加 |
+| 数据集 | `data/retrieval/ABC/V2/dataset.py` | `ABC_V2Dataset`：读取 12 视图（顶6+底6，224²），按 config 中 `view_type`（top/bottom/both）取对应视图组；`collate_fn=abc_collate_fn_v2` 处理变长草图批次 |
+| 配置 | `utils/config.py` | 统一管理所有超参与路径；是 §2.2 固定值的权威来源 |
+| C++ 部署参考 | `C++/` | libtorch + OpenCV + hnswlib 组合的推理参考实现；演示从特征提取到近邻检索的完整 C++ 链路；新栈（Rust/axum）按此逻辑重写 |
+
+### 2.2 关键事实（来自 config.py）
+
+以下数值均有明确出处，非魔法数：
+
+- **`num_classes = 8422`**：ABC 数据集第一个 STEP chunk 经两轮去重（来源：ABC_V2 chunk1 去重统计）后保留的 CAD 模型数量，约 ~8,422 件。
+- **12 视图（顶6+底6，224²）**：每个模型渲染顶部6帧（仰视方向均匀分布）+ 底部6帧（俯视方向均匀分布），分辨率均为 224×224。（来源：config.py `n_views=6`，`view_type` 可取 `top`/`bottom`/`both`）
+- **`n_views = 6`**：单次前向传播时传入编码器的视图帧数，顶或底各取一组6帧。（来源：config.py）
+- **`deduplicate_ratio = 2`**：检索时顶/底视图各产出一条特征向量，同一模型在特征库中占2条记录；检索后按此比值折叠去重以对齐到模型级。（来源：config.py）
+- **`collate_fn = abc_collate_fn_v2`**：数据集专用批次整理函数，处理草图分辨率变长、视图张量堆叠对齐。（来源：`data/retrieval/ABC/V2/dataset.py`）
+
+这些值在整个 8.4K 阶段保持不变，后续扩展数据规模时需同步更新 `num_classes` 及相关路径。
+
+### 2.3 数据资产
+
+| 资产 | 位置 | 状态 | 用途 |
+|------|------|------|------|
+| 样例查询草图 | `data/retrieval/ABC/V2/input/` | 仓库内已有少量样例 | demo 演示 / 冒烟测试 |
+| 渲染视图 | `~/data/abc_v2/renders/views/`（大盘） | **需获取或本地重建** | 训练/测试视图分支输入 |
+| 合成草图 | `~/data/abc_v2/renders/sketches/`（大盘） | **需获取或本地重建** | 训练草图分支输入（PhotoSketch 产出） |
+| 训练/测试分割 | `~/data/abc_v2/splits/train/` `test/`（大盘） | **需获取或本地重建** | 数据集划分索引 |
+| B-rep 图数据 | `~/data/abc_v2/graphs/graph*.pt`（大盘） | **需生成**（最主要缺口） | B-rep 图编码器输入 |
+| SE-ResNet50 预训练权重 | `model/Baseline/path_state_dict/seresnet50.a1_in1k.bin` | 需下载放置到该路径 | 骨架网络初始化 |
+| PhotoSketch 推理权重 | `tool/PhotoSketch.zip` | 仓库内有打包存档 | 边缘图→草图风格化合成 |
+
+训练/测试数据及图数据体量超出版本控制合理范围，均落 `~/data/` 大盘（见 §0.2 数据落盘约定），不入仓库。
+
+### 2.4 可复用资产
+
+以下资产在项目中已存在，可直接作为后续各里程碑的实现基础：
+
+**OCC/OCP STEP 处理链**
+`opencascade`（OCC）与 `OCP` Python 绑定提供 STEP→B-rep 解析、mesh 曲面化、边缘轮廓线提取的开源兼容层。B-rep 图提取器（缺口2）及渲染管线均以此为基础构建，无需引入额外 CAD 内核依赖。
+
+**ABC 下载器**
+项目内已有针对 ABC 数据集的批量下载脚本，具备：7z 归档头校验（防止部分下载被当完整文件处理）、5× 重试带指数退避、断点续传（resume）、代理透传支持。M1 数据落地阶段可直接复用，只需配置目标路径与代理参数。
+
+**download-probe 设计**
+基于 LanceDB manifest 的下载状态追踪 + 拓扑探查质量筛选设计已完成。manifest 显式记录每个模型的下载状态、解析状态与质量标志，使失败与筛除可观测、可复现，避免隐式跳过带来的数据偏差。M1/M2 阶段直接按此设计实现。
+
+**`web/` Astro 站点 + three.js 模型查看器**
+前端代码库 `web/` 已包含基于 Astro 构建的静态站点骨架与 three.js 的 STEP/mesh 三维查看器组件。M6 前端交付阶段以此为基础，添加草图输入框、检索结果列表与相似度得分展示，复用已有的构建配置与组件约定。
+
+### 2.5 缺口清单（按优先级）
+
+1. **数据落地**：渲染视图（`views/`）、合成草图（`sketches/`）、训练/测试分割（`train/`/`test/`）均需从网盘获取或在 GPU 机本地重建。这是所有训练任务的前置条件，阻塞 M1 之后全部里程碑。
+
+2. **B-rep 图数据（`graph*.pt`）**：8.4K 阶段最主要的补全项。需编写 STEP→图提取器，将 B-rep 面/边 UV-grid 预计算并序列化为 `graph*.pt`。提取失败（损坏 STEP、OCC 解析异常）的模型回退至 CNN-only 路径，不强制排除，但须在 manifest 中显式标记。
+
+3. **环境对齐**：`timm`（SE-ResNet50 权重格式）、`PyG`（torch_geometric 及其 C++ 扩展）、`faiss-gpu` 在 RTX 5090 / CUDA 12.8 / torch 2.8 下的兼容性尚未验证。尤其 PyG↔torch 2.8 的 CUDA 扩展编译是已知风险点，M0 阶段须先行验证。
+
+4. **质量/失败清单**：训练数据中损坏、几何退化、解析失败的模型需通过 manifest 显式记录并可按标志过滤，避免训练循环因隐式跳过而产生难以复现的数据偏差。
+
+5. **导出与服务**：草图编码器需导出为 ONNX 并封装进 Rust/axum 服务（含热路径向量检索）。现有代码库仅提供 C++ 参考实现（libtorch + hnswlib），新服务栈需按参考逻辑从头实现，是**交付关键路径**上的主要工程量。
+
+6. **评估留出集**：需按草图维度（非模型维度）划分 query 留出集，确保评估时查询草图不出现在训练集中。当前分割方式需核查是否满足此约束；若不满足，须重新划分并更新 manifest。
+
+### 2.6 资产×缺口矩阵
+
+| 缺口 | 可复用资产 | 需新建 | 关键路径? |
+|------|-----------|--------|-----------|
+| 1 数据落地（views/sketches/train/test） | ABC 下载器（7z校验+重试+resume）；download-probe manifest 设计 | 大盘目录结构初始化脚本；PhotoSketch 批量推理脚本（调用已有权重） | **是（8.4K 阶段关键路径）** |
+| 2 B-rep 图数据（`graph*.pt`） | OCC/OCP STEP 处理链；download-probe manifest（记录提取状态） | STEP→UV-grid→`graph*.pt` 提取器；失败回退标记逻辑 | **是（8.4K 阶段关键路径）** |
+| 3 环境对齐（timm/PyG/faiss/CUDA12.8） | 仓库现有 `requirements` 文件（作为起点） | 兼容性验证脚本（PyG C++ 扩展编译测试；faiss-gpu smoke test；ort CUDA12.8 推理测试） | 是（M0 风险门，阻塞训练） |
+| 4 质量/失败清单（manifest） | download-probe manifest 设计；现有下载器失败日志结构 | manifest schema 扩展（增加解析状态、几何质量标志字段）；过滤工具 | 否（但影响可复现性） |
+| 5 导出与服务（ONNX + Rust/axum） | C++ 部署参考（`C++/`，逻辑蓝本）；`web/` Astro 前端骨架 | ONNX 导出脚本；Rust/axum 服务（特征提取端点 + 暴力点积检索）；FastAPI 回退服务（逃生舱） | **是（交付关键路径）** |
+| 6 评估留出集（按草图划分） | 现有 `train/test` 分割索引（核查起点） | 分割验证脚本（检查 query 草图泄漏）；必要时重新划分并更新 manifest | 否（但影响指标可信度） |
 
 ## 3. 系统架构
 
