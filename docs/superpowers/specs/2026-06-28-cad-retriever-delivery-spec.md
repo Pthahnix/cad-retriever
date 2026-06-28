@@ -1457,7 +1457,424 @@ Top-1 / Top-10 精度目标：`[待回填 | 回填依据：阶段 B R1 实测基
 
 ## 7. 部署与服务
 
-> （本节由对应任务填充）
+本节覆盖从 PyTorch 模型导出到线上服务的完整路径，包括 ONNX 导出规格、向量检索方案、产物交接契约、API 全契约、前端集成、安全要求和回退判定。Part 9 的 build-artifact / serve / frontend 三个执行单元直接据本节展开。
+
+---
+
+### 7.1 推理路径（PyTorch → ONNX）
+
+#### SE-ResNet50 草图编码器导出
+
+SE-ResNet50 草图编码器的计算图由纯 conv / BN / ReLU / SE（squeeze-excitation）/ 池化 / linear 算子构成，所有算子均有成熟 ONNX 映射，导出路径干净。
+
+导出规格：
+
+| 参数 | 值 |
+|------|----|
+| opset | 17 或以上 |
+| 动态轴 | 仅 batch 维（axis 0） |
+| H / W | 固定 224 × 224 |
+| 输入 dtype | float32，NCHW |
+| 输出 dtype | float32，shape [batch, 512] |
+
+导出后必须执行 **PyTorch ↔ ONNX 数值对齐测试**，通过条件：
+
+- 同批次输入的 mean cosine similarity > 0.999
+- top-K 排名完全一致（以 K=10 为基准）
+
+两项均通过才允许将该 .onnx 文件纳入产物。
+
+#### CLIP-ViT + LoRA（若消融选中）
+
+若消融结果选定 CLIP-ViT+LoRA 主干，导出前必须先执行 `merge_and_unload()`，将 LoRA adapter 权重合并回基座，产出一个**单一标准 ViT 权重**，再对这个合并后的模型执行 ONNX 导出。严禁将 adapter 作为独立分支挂在导出图之外——双分支结构会让 serve 侧依赖训练框架，破坏单二进制部署目标。
+
+导出附加约束：
+
+- 输入固定方形尺寸，不开启动态分辨率
+- 关闭所有异型 attention kernel（flash-attention、memory-efficient attention 等），确保算子落在标准 ONNX MultiHeadAttention / MatMul 路径上
+- 同样执行上述数值对齐测试，通过后方可放行
+
+#### B-rep GNN 确认离线-only
+
+B-rep GNN（PyG 实现）中的 `scatter_reduce` 等图聚合算子是 ONNX 的雷区——PyG 的图形聚合没有官方 ONNX 算子映射，强行导出会产生不可维护的自定义 op 或导出失败。
+
+**B-rep GNN 严格限定为离线建库阶段使用**：在建库时对 CAD 文件提取几何特征向量，将结果向量写入 embeddings.npy，此后 GNN 不参与任何在线推理路径，永不进入 ONNX 图，永不出现在 Rust serve 进程中。
+
+#### 关于"烘进图"
+
+首版不做任何算子烘焙（graph constant folding / operator fusion by hand）。归一化层（减均值除标准差）可在后期以 2 个前缀算子（Sub + Div）折叠进图，作为可选优化项，但不是 V1 的交付条件。
+
+---
+
+### 7.2 向量检索
+
+#### 首版：暴力点积
+
+建库阶段对所有向量做 L2 归一化，serve 阶段只执行点积（等价于 cosine similarity），取 top-K。
+
+```
+score[i] = embeddings[i, :] · query[:]   # embeddings 已 L2 归一化，query 已 L2 归一化
+```
+
+实现形式：在内存中加载 `embeddings.npy`（float32 [N, 512] 行主序），推理时做单次矩阵-向量乘，argsort 取 top-K。
+
+#### 规模阈值与 ANN 切换
+
+512 维暴力点积的实际规模上限有来源依据：usearch 文档和 FAISS 基准测试均表明，512 维、CPU 端、百万量级时暴力检索延迟在毫秒到十几毫秒区间，GPU 端（单卡）几乎可以无限扩展到本系统可触及的库规模。[待回填|回填依据：实测 N=8K/100K/1M 三档延迟后补充]
+
+切换判定规则：
+
+- N ≤ ~1M，或 serve 在 GPU 上执行：保持暴力点积
+- N 超过 ~1M **且** CPU 受限（serve 必须跑在纯 CPU 环境）：引入 ANN
+
+ANN 选型：**usearch**（Rust 原生 crate，支持 cosine / IP 距离）。不在 Rust 侧集成 FAISS——FAISS 的 Rust 绑定维护状态弱，在 Windows / Linux 混合环境下链接问题频发。
+
+#### V2 视角去重
+
+V2 扩展时，同一模型的顶视角和底视角可能各自出现在检索结果中。去重逻辑在 top-100 候选之上执行（按 model_id 折叠，保留最高分视角），与底层是否使用 ANN 无关。
+
+---
+
+### 7.3 服务形态（Rust / axum）
+
+#### 启动加载序列
+
+服务启动时按以下顺序加载产物：
+
+1. 读取 `manifest.json`，提取 schema_version / dim / metric / count / preprocess 参数
+2. 加载 `sketch_encoder.onnx`（ort crate，优先 CUDA EP，CUDA EP 不可用时自动回退 CPU EP）
+3. mmap 打开 `embeddings.npy`，验证 shape [N, dim]
+4. 加载 `ids.json` 和 `metadata.json` 到内存
+5. 执行**启动完整性校验**（见下节）
+
+#### 启动完整性校验
+
+校验失败时拒绝启动，输出明确错误信息：
+
+| 校验项 | 期望值 | 失败动作 |
+|--------|--------|----------|
+| ONNX 模型输出维度 | == manifest.dim（512） | panic，拒启动 |
+| embeddings.npy 列数 | == manifest.dim（512） | panic，拒启动 |
+| embeddings.npy 行数 | == ids.json 长度 | panic，拒启动 |
+| manifest.metric | "ip" 或 "l2" | panic，拒启动 |
+| manifest.schema_version | 已知版本号 | panic，拒启动 |
+
+#### HTTP 端点
+
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | `/healthz` | 就绪探针；启动校验通过后返回 200 + `{"status":"ok"}` |
+| POST | `/search` | multipart 草图上传 → 编码 → 检索 → 返回 top-K JSON |
+| GET | `/models/:id/thumbnail` | 返回指定 model_id 的缩略图（路径白名单校验） |
+
+#### Rust 端预处理
+
+预处理完全在 Rust 侧执行（`image` crate），不依赖 Python 运行时：
+
+1. 解码上传图片（MIME 白名单，解码后分辨率上限校验）
+2. 转灰度（channels 由 manifest.preprocess.channels 决定）
+3. resize 到 manifest.preprocess.input_size（[224, 224]），resize_mode 由 manifest 指定
+4. 归一化：`(pixel - mean) / std`，参数来自 manifest.preprocess
+5. 转 NCHW float32 tensor，送入 ONNX 推理
+
+所有预处理参数**均来自 manifest.json**，serve 二进制不硬编码任何数值。
+
+---
+
+### 7.4 产物交接契约（build → serve，全 schema）
+
+#### 产物目录树
+
+```
+artifact/
+├── manifest.json          # 版本门，serve 启动第一读
+├── sketch_encoder.onnx    # 草图编码器，opset 17+
+├── embeddings.npy         # float32 [N, 512]，L2 归一化，行主序
+├── ids.json               # [N] 字符串，row index → model_id
+├── metadata.json          # model_id → 元数据对象
+└── thumbnails/
+    ├── <model_id>_top.jpg
+    ├── <model_id>_bot.jpg
+    └── ...
+```
+
+#### manifest.json schema
+
+```json
+{
+  "schema_version": "1",
+  "dim": 512,
+  "metric": "ip",
+  "count": 8422,
+  "encoder": "se_resnet50_sketch",
+  "normalized": true,
+  "preprocess": {
+    "input_size": [224, 224],
+    "channels": 1,
+    "mean": [0.5],
+    "std": [0.5],
+    "resize_mode": "bilinear"
+  }
+}
+```
+
+字段说明：
+
+| 字段 | 类型 | 约束 |
+|------|------|------|
+| schema_version | string | serve 拒绝未知版本 |
+| dim | integer | 必须为 512；与 .npy 列数、ONNX 输出维一致 |
+| metric | string | "ip"（内积，适用于已归一化向量）或 "l2" |
+| count | integer | 等于 embeddings.npy 行数和 ids.json 长度 |
+| encoder | string | 标识主干，用于日志/诊断，不影响运行时逻辑 |
+| normalized | boolean | true 表示 embeddings 已 L2 归一化，serve 只做点积 |
+| preprocess.input_size | [h, w] | 固定 [224, 224] |
+| preprocess.channels | integer | 1（灰度）或 3（RGB） |
+| preprocess.mean / std | float[] | 长度等于 channels |
+| preprocess.resize_mode | string | "bilinear" 或 "nearest" |
+
+#### embeddings.npy
+
+- dtype: float32
+- shape: [N, 512]，行主序（C order）
+- 每行已 L2 归一化（‖v‖₂ = 1）
+- 由建库阶段（build-artifact 单元）写入，serve 只读
+
+#### ids.json
+
+```json
+["abc_00001_top", "abc_00001_bot", "abc_00002_top", ...]
+```
+
+- 长度 N，与 embeddings.npy 行数严格对应
+- 每个 id 格式：`<model_id>_<slot>`，slot 为 "top" 或 "bot"
+- 用于检索结果中的 model_id 回溯
+
+#### metadata.json
+
+```json
+{
+  "abc_00001": {
+    "name": "abc_00001",
+    "step_path": "data/abc/abc_00001.step",
+    "thumbnail_path": "thumbnails/abc_00001_top.jpg",
+    "view_count": 12,
+    "source": "ABC_V2"
+  }
+}
+```
+
+键为 model_id（不含 slot 后缀），值字段：
+
+| 字段 | 说明 |
+|------|------|
+| name | 可读标识 |
+| step_path | STEP 文件相对路径（供 3D 查看器用） |
+| thumbnail_path | 默认展示缩略图相对路径 |
+| view_count | 该模型渲染视角数 |
+| source | 数据来源标识，如 "ABC_V2" |
+
+#### thumbnails/
+
+JPEG 格式，文件名规则：`<model_id>_<slot>.jpg`。`<slot>` 对应顶视角（top）或底视角（bot）。serve 通过 `/models/:id/thumbnail` 暴露，路径访问受白名单限制（见 §7.7）。
+
+#### 契约核心规则
+
+1. **建库时归一化**：embeddings.npy 写入前完成 L2 归一化，serve 侧只执行点积，不再做归一化。
+2. **manifest 是版本门**：schema_version / dim / metric 任一不匹配，serve 拒绝启动。
+3. **热数组与映射分离**：embeddings.npy 走 mmap 热路径，ids.json / metadata.json 走 HashMap 查询，两者独立加载，互不耦合。
+4. **主干透明替换**：换主干（SE-ResNet50 → ViT 或反向）只需重新产出 sketch_encoder.onnx 和 embeddings.npy，manifest.encoder 字段更新，serve 代码无需改动。
+
+---
+
+### 7.5 /search API 全契约
+
+#### 请求
+
+```
+POST /search
+Content-Type: multipart/form-data
+
+字段:
+  image   (必填) 草图图片文件，MIME 白名单见 §7.7
+  k       (可选, integer) 返回结果数，默认 10，上限 100
+```
+
+#### 响应 JSON schema
+
+```json
+{
+  "query_id": "string",
+  "results": [
+    {
+      "model_id": "string",
+      "score": "number (float, 0–1 当 metric=ip 且已归一化)",
+      "rank": "integer (1-based)",
+      "thumbnail_url": "string (相对路径或绝对 URL)",
+      "metadata": {
+        "name": "string",
+        "step_path": "string",
+        "view_count": "integer",
+        "source": "string"
+      }
+    }
+  ]
+}
+```
+
+#### 具体响应示例
+
+```json
+{
+  "query_id": "q_1719542400_0001",
+  "results": [
+    {
+      "model_id": "abc_03821",
+      "score": 0.9412,
+      "rank": 1,
+      "thumbnail_url": "/models/abc_03821/thumbnail",
+      "metadata": {
+        "name": "abc_03821",
+        "step_path": "data/abc/abc_03821.step",
+        "view_count": 12,
+        "source": "ABC_V2"
+      }
+    },
+    {
+      "model_id": "abc_00774",
+      "score": 0.9187,
+      "rank": 2,
+      "thumbnail_url": "/models/abc_00774/thumbnail",
+      "metadata": {
+        "name": "abc_00774",
+        "step_path": "data/abc/abc_00774.step",
+        "view_count": 12,
+        "source": "ABC_V2"
+      }
+    }
+  ]
+}
+```
+
+#### 错误响应
+
+| HTTP 状态码 | 触发条件 | 响应体示例 |
+|-------------|----------|------------|
+| 400 | 图片解码失败 / 字段缺失 | `{"error":"decode_failed","message":"..."}` |
+| 413 | 请求体超过 body-size 上限 | `{"error":"payload_too_large","message":"..."}` |
+| 415 | MIME 类型不在白名单 | `{"error":"unsupported_media_type","message":"..."}` |
+| 429 | 触发限流 | `{"error":"rate_limited","message":"...","retry_after":60}` |
+| 503 | 服务未就绪（启动校验未通过）| `{"error":"not_ready","message":"..."}` |
+
+**此表是 serve ↔ frontend 的唯一契约**。前端不依赖任何其他 serve 内部结构。
+
+---
+
+### 7.6 前端（Astro）
+
+前端复用 `web/` 目录下已有的 Astro demo（包含 three.js 3D 查看器、结果网格组件、文件上传栏）。
+
+#### 集成改动点
+
+| 位置 | 改动 |
+|------|------|
+| 上传栏 | 接收草图图片（JPEG / PNG），打包为 multipart/form-data |
+| fetch 逻辑 | `POST /search`，携带 image 字段和可选 k 值 |
+| 结果网格 | 渲染 `results[]` 中每项的 thumbnail_url + score + rank |
+| 3D 查看器 | 点击结果项 → 以 step_path 加载 3D 模型（复用现有 three.js 查看器逻辑） |
+| 错误处理 | 展示 4xx / 5xx 错误码对应的用户友好提示 |
+
+前端与 serve 之间**仅经由 `/search` JSON 接口通信**，不依赖 serve 的内部实现语言（Rust 或 Python），serve 侧语言切换对前端透明。
+
+---
+
+### 7.7 安全（网络暴露前必做）
+
+> **⚠️ 强制要求：在任何网络暴露（局域网或公网）前，以下安全措施必须全部到位。不允许以任何形式在公网开放无鉴权端点。未完成本节要求的部署视为未完成交付。**
+
+#### 输入限制
+
+| 防护项 | 具体要求 | 说明 |
+|--------|----------|------|
+| body-size 上限 | [待回填\|回填依据：实测典型草图大小后定，参考上限 10 MB] | 在 HTTP 层拒绝，返回 413 |
+| 解码后分辨率上限 | 解码后像素总数 ≤ [待回填\|回填依据：防图片炸弹，参考上限 4096×4096] | 解码前读取元信息，超限返回 400 |
+| MIME 白名单 | image/jpeg, image/png（最小集，可按需扩展） | 非白名单 MIME 返回 415 |
+| 请求超时 | 端到端 ≤ [待回填\|回填依据：实测 P99 推理延迟后定] | 超时返回 504 |
+
+**图片炸弹（image bomb）防护说明**：攻击者可发送一张极小的压缩文件（几 KB），解码后展开为数百 MB 的大图，耗尽服务内存。防护方式：在完整解码前先读取图片头部元信息，获取声明的宽高；若声明尺寸超限则直接拒绝，不执行完整解码。
+
+#### 鉴权与限流
+
+| 防护项 | 最低要求 | 说明 |
+|--------|----------|------|
+| 鉴权 | 共享 token（Bearer Token 或自定义 header） | 所有非 /healthz 端点均需鉴权；token 通过环境变量注入，不硬编码 |
+| 限流 | 按 IP 和/或用户限制请求速率 | 触发后返回 429 + Retry-After header |
+
+**明确声明**：向公网暴露无鉴权端点是严重安全风险，本系统不允许此类部署。即便是内网暴露，也应在上线前评估是否需要鉴权。
+
+#### 文件访问限制
+
+- **缩略图**：`/models/:id/thumbnail` 仅允许访问 `thumbnails/` 目录下以 model_id 命名的白名单文件，禁止路径穿越（path traversal）。实现时对 `:id` 做严格字符校验（仅允许字母数字和下划线），不接受 `../`、绝对路径或其他特殊字符。
+- **STEP / CAD 文件**：serve 进程不暴露任意 CAD 文件下载端点。3D 查看器若需加载 STEP 文件，需走独立的、同样受鉴权保护的端点，且路径同样做白名单校验。
+- **内部路径不外泄**：错误响应中不包含服务器文件系统路径、堆栈跟踪或内部 ID 枚举信息。
+
+#### 安全检查清单（上线前逐项确认）
+
+- [ ] body-size 限制已配置并实测
+- [ ] 解码前分辨率检查已实现
+- [ ] MIME 白名单已启用
+- [ ] 请求超时已配置
+- [ ] 鉴权中间件已启用，/search 无法在无 token 情况下响应
+- [ ] 限流已启用，429 响应已验证
+- [ ] 缩略图路径穿越已测试（尝试 `../` 等构造，确认返回 400/404）
+- [ ] serve 错误响应不含内部路径信息
+
+---
+
+### 7.8 诚实回退判定
+
+#### Rust / axum 的实际收益评估
+
+本系统的热路径结构是：单张草图图片 → 单个小型编码器（SE-ResNet50 或 ViT-B）→ 512 维向量 → 暴力点积 → top-K JSON。推理本身由 ONNX Runtime（ort）执行，Rust 运行时本身对推理延迟的影响有限。
+
+Rust 相对于 FastAPI+Python 的真实收益主要体现在：
+
+| 收益点 | 说明 |
+|--------|------|
+| 单一静态二进制 | 部署无需 Python 环境，容器镜像更小，冷启动更快 |
+| 无 GIL | 并发请求不受 Python GIL 限制，多核利用更充分 |
+| 低空闲内存 | Rust 进程空闲时内存占用显著低于 Python 进程 |
+| 内存安全 | mmap embeddings.npy 的并发读写不需要显式锁 |
+
+相对地，**单请求延迟优势有限**：推理延迟由 GPU 执行时间主导，HTTP 框架（axum vs uvicorn）的差异在整体延迟中占比极小。
+
+#### 回退触发条件
+
+回退触发的唯一条件是：**`ort` crate 与 CUDA EP 在 RTX 5090（Blackwell 架构 / CUDA 12.x）上链接或打包不顺**——包括但不限于：ort 版本未支持 Blackwell SM 架构、CUDA EP 在 Windows 环境下动态链接失败、ort + cuDNN + TensorRT 版本矩阵不兼容。
+
+此条件在 M0 环境对齐阶段（风险点 R-ENV-01）提前验证。
+
+#### 回退路径：FastAPI + onnxruntime-gpu
+
+回退方案使用 FastAPI（Python）+ onnxruntime-gpu，提供**完全相同的 `/search` API 契约**（见 §7.5）。
+
+回退的三个关键属性：
+
+1. **前端无感**：前端仅依赖 `/search` JSON 接口，serve 侧语言切换对前端完全透明。
+2. **零能力损失**：推理结果由 ONNX Runtime 执行，Python 和 Rust 使用同一个 .onnx 文件，检索结果完全一致。
+3. **逃生舱，非降级**：回退是一个有触发条件的工程决策，在触发条件不发生时 Rust 路径保持首选；触发后 FastAPI 以等效能力接替，不存在功能缩水。
+
+#### 决策节点
+
+```
+M0 环境对齐阶段:
+  ort + CUDA EP 在 5090 上链接 OK ?
+    ├─ YES → 继续 Rust / axum 路径
+    └─ NO  → 切换 FastAPI + onnxruntime-gpu 路径
+             （/search 契约不变，后续步骤无需修改）
+```
+
+---
 
 ## 8. 开发流程与时间线
 
