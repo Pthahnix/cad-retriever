@@ -562,6 +562,19 @@ flowchart TD
 
 **独立替换保证**：任一单元可在不修改其他两个单元的前提下替换。例如，将 `serve` 从 Rust 回退至 FastAPI 逃生舱，只需保持产物目录契约和 `/search` API 不变，`build` 与 `frontend` 无需感知此变化。
 
+```mermaid
+flowchart LR
+    build["build（Python，3×5090）<br/>数据→训练→提特征→打包<br/>离线，按需重跑"]
+    serve["serve（Rust：axum + ort）<br/>加载产物→HTTP→/search<br/>在线，持续运行"]
+    frontend["frontend（Astro）<br/>上传 UI→调 /search→展示<br/>在线，可静态分离部署"]
+
+    build -- "产物目录契约（§7.4）<br/>embeddings.npy / .onnx / ids / metadata / manifest / thumbnails" --> serve
+    serve -- "/search JSON 契约（§7.5）<br/>multipart 草图 → [{model_id, score, rank, thumbnail_url}]" --> frontend
+```
+
+> 两条契约是单元间唯一的耦合面：契约不变，任一单元的内部实现（如 serve Rust↔FastAPI）可独立替换。
+
+
 ---
 
 ### 3.5 关键不变量
@@ -634,6 +647,33 @@ ONNX 编码器输出维度
 | **⑦ 草图生成** | PhotoSketch 预训练 GAN，纯推理模式，对每视图做风格迁移 | 同 PhotoSketch 开源版（GitHub 官方仓库），推理脚本相同 | `~/data/processed/sketches/<model>/<model>_{0..11}.png` |
 | **⑧ B-rep 图提取** | STEP 拓扑 → UV-grid 图；见 §4.4 规格 | OCC 拓扑遍历 + UV 采样；同规格，见 §4.4 | `~/data/processed/graph_train.pt` / `graph_test.pt` |
 | **⑨ 切分** | `data_process.py`：10:2 比例，顶/底各保留 1 张 test 视图 | 沿用同脚本；评估协议对齐见 §6 | `~/data/processed/train/` / `test/` 子目录索引 |
+
+**双路径汇入同构产物**（两条路径分别覆盖不同工具可用性场景，产出布局完全一致，下游训练无感来源）：
+
+```mermaid
+flowchart LR
+    step["STEP 文件"]
+
+    subgraph 既有工具链路径["既有工具链路径（商业工具许可可用）"]
+      direction TB
+      cm["Crossmanager → OBJ→OFF"] --> s3d["Sketch3DToolkit 渲染 12 视图"]
+    end
+
+    subgraph 开源兼容层["开源兼容层（需完全开源可复现）"]
+      direction TB
+      occ["OCC/OCP → STL/mesh"] --> mg["moderngl/pyrender 渲染 12 视图"]
+    end
+
+    ps["PhotoSketch 风格迁移（两路径共用）"]
+    out["同构产物：views/ · sketches/ · graph*.pt<br/>（布局/命名/视角一致，下游无感）"]
+
+    step --> cm
+    step --> occ
+    s3d --> ps
+    mg --> ps
+    ps --> out
+    step -. "B-rep 图提取（OCC，两路径共用）" .-> out
+```
 
 **目录树（落盘布局）：**
 
@@ -912,6 +952,22 @@ tools/
 ---
 
 ### 5.3 阶段化执行 A / B / C / D
+
+消融按 A→B→C→D 四阶段推进，先用 < 1 h 的探针给 CLIP 臂把门，再逐步展开矩阵，最后定稿复现：
+
+```mermaid
+flowchart TD
+    A["阶段 A：坍缩探针（< 1 h）<br/>冻结 CLIP-ViT，零训练 embed 留出集<br/>看有效秩 / 随机对余弦 / 零样本 Top-100"]
+    A --> gate{"CLIP 臂放行？"}
+    gate -- "秩健康 → 放行" --> B
+    gate -- "塌成低秩锥 → 降优先级" --> Bse["阶段 B/C 仅走 SE-ResNet50 臂"]
+
+    B["阶段 B：关键二选一（2 run）<br/>R1 = SE / CNN-only（基线锚点）<br/>R3 = SE / BOTH（几何上行测试）"]
+    B --> C["阶段 C：部分析因矩阵（≤ 9 run）<br/>3 卡分波展开，每轴 ≥ 2 次触碰<br/>R1/R3 复用阶段 B 不重跑"]
+    Bse --> C
+    C --> D["阶段 D：定稿（≤ 2 run）<br/>按决策规则选主干（ΔTop-1 ≥ 2 pp 且换种子成立）<br/>top-1/top-2 换种子复现"]
+    D --> out["交付主干 + 消融报告（含 bootstrap 95% CI）"]
+```
 
 #### 阶段 A — 坍缩探针（< 1 h，先于任何训练）
 
@@ -1697,6 +1753,31 @@ Content-Type: multipart/form-data
 
 **此表是 serve ↔ frontend 的唯一契约**。前端不依赖任何其他 serve 内部结构。
 
+**`/search` 请求时序**（成功路径 + 安全前置校验）：
+
+```mermaid
+sequenceDiagram
+    participant FE as Astro 前端
+    participant SV as serve (Rust/axum)
+    participant ON as ONNX 编码器 (ort)
+    participant IDX as embeddings (mmap)
+
+    FE->>SV: POST /search (multipart 草图 + 可选 top_k)
+    Note over SV: 鉴权 → body-size → MIME 白名单 → 图片炸弹防护
+    alt 安全校验未过
+        SV-->>FE: 4xx (401/413/415/429)
+    else 校验通过
+        SV->>SV: 预处理（解码→灰度→resize→NCHW f32）
+        SV->>ON: 前向（CUDA EP 优先，CPU EP 回退）
+        ON-->>SV: 512-d 向量
+        SV->>SV: L2 归一化（仅 query）
+        SV->>IDX: 暴力点积 → top-100
+        IDX-->>SV: top-100 行
+        SV->>SV: 按 model_id 去重（顶/底取最优）→ top-K
+        SV-->>FE: 200 {query_id, results:[{model_id, score, rank, thumbnail_url, metadata}]}
+    end
+```
+
 ---
 
 ### 7.6 前端（Astro）
@@ -2086,6 +2167,33 @@ gantt
 | frontend | 上传与展示 | `/search` | 浏览器 UI | Astro |
 
 九个单元通过两个契约解耦（产物目录契约 §7.4、`/search` JSON 契约 §7.5），任一单元可独立替换实现而不波及其余。
+
+```mermaid
+flowchart TD
+    dl["download / ingest<br/>取 STEP + 登记 manifest"]
+    pb["probe<br/>拓扑探查 + 质量 flag"]
+    rd["render<br/>STEP → 12 视图"]
+    sk["sketch<br/>视图 → 草图"]
+    gr["graph<br/>STEP → UV-grid 图"]
+    tr["train<br/>消融训练 + 选主干"]
+    ba["build-artifact<br/>提特征 + 打包"]
+    sv["serve<br/>在线 /search"]
+    fe["frontend<br/>上传与展示"]
+
+    dl --> pb
+    pb -- "render_eligible" --> rd
+    pb -- "render_eligible" --> gr
+    rd --> sk
+    rd --> tr
+    sk --> tr
+    gr --> tr
+    tr --> ba
+    ba == "产物目录契约 §7.4" ==> sv
+    sv == "/search JSON 契约 §7.5" ==> fe
+```
+
+> 粗线（`==`）标出两条解耦契约的位置：build-artifact→serve 与 serve→frontend。契约左侧是离线 build 域，右侧是在线服务域。
+
 
 ### 9.1 download / ingest 单元
 
@@ -2891,6 +2999,29 @@ Data(
 | 数据获取受阻（R-11） | 开源兼容层重建 | `views/`/`sketches/`/`graph*.pt` 布局契约 |
 
 核心：回退是「沿契约边界换实现」，不是「推翻重来」。任一单元回退到更简单实现时，上下游因契约不变而无感。
+
+```mermaid
+flowchart LR
+    subgraph 触发
+      t1["GNN/BOTH 不可行<br/>R-01/R-04/R-06"]
+      t2["Rust 服务受阻<br/>R-03"]
+      t3["ViT-LoRA 导出漂移<br/>R-08"]
+      t4["检索延迟超预算<br/>R-09"]
+      t5["数据获取受阻<br/>R-11"]
+    end
+    subgraph 回退后形态["回退后形态（更简单/更已验证）"]
+      f1["CNN-only 全流程闭环"]
+      f2["FastAPI + onnxruntime-gpu"]
+      f3["CNN 主干（对齐门易过）"]
+      f4["usearch ANN / GPU 检索"]
+      f5["开源兼容层重建"]
+    end
+    t1 -- "分离编码器契约 + 零填充" --> f1
+    t2 -- "/search JSON 契约不变" --> f2
+    t3 -- "产物契约不变" --> f3
+    t4 -- "serve 内部，/search 不变" --> f4
+    t5 -- "数据布局契约不变" --> f5
+```
 
 ### 10.3 风险监控点
 
