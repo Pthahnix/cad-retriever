@@ -678,7 +678,277 @@ ONNX 编码器输出维度
 
 ## 4. 数据管线
 
-> （本节由对应任务填充）
+### 4.1 原则
+
+本系统的数据管线在 8.4K 阶段**沿用既有已验证的工具链路径**（含商业软件与不可独立复现的环节），理由是：该路径已产出完整的 `views/`、`sketches/`、`graph*.pt` 数据集，贴近现有数据、零返工，是当前阶段的最短路径。
+
+与此同时，针对每个不可复现的商业/专有环节，系统**并行维护一条开源兼容层路径**，供后续扩规模（超出 8.4K 数量级）时独立复现整套管线。
+
+**两条路径产出同构数据**：目录布局、文件命名、张量格式完全一致（同样的 `views/<model>/`、`sketches/<model>/`、`graph*.pt` 结构），下游训练单元无需感知当前数据来自哪条路径。
+
+两条路径的定位：
+
+| 路径标签 | 适用场景 | 核心工具 |
+|----------|----------|----------|
+| **既有工具链路径**（商业工具路径） | 8.4K 阶段沿用；已有数据直接复用 | Crossmanager、Sketch3DToolkit、PhotoSketch |
+| **开源兼容层** | 扩规模复现；新增数据或重新生成 | OCC/OCP、moderngl/pyrender、PhotoSketch（开源版） |
+
+---
+
+### 4.2 管线步骤与双路径
+
+下表按步骤顺序列出整条管线，每步注明两条路径的具体工具与产物。
+
+| 步骤 | 既有工具链路径（8.4K 沿用） | 开源兼容层（扩规模） | 产物 |
+|------|-----------------------------|----------------------|------|
+| **① 下载** | 校内网盘已有完整 ABC STEP 文件；直接挂载或拷贝至 `~/data/raw/step/` | `download.py`：从 ABC 官方 7z 分包下载，SHA-256 逐包校验，支持断点续传与代理 | `~/data/raw/step/**/*.step` |
+| **② 去重 1（按文件大小）** | `FindDuplicatesByFileSize.ps1`：按字节数聚组，同组保留首个 | 同脚本跨平台 Python 等价实现（`os.stat` 遍历） | `~/data/interim/deduplicate1.txt`（剔除列表） |
+| **③ 去重 2（按 JSD 散度）** | `FindDuplicatesByJSD.py`：对保留集计算面积/曲率 JSD，高相似对剔除次项 | 沿用同一脚本（已开源） | `~/data/interim/deduplicate2.txt`（剔除列表） |
+| **④ 质量探查** | `download-probe`：拓扑遍历读取 `n_faces`、`file_size`、实体数，写 manifest | 同 `download-probe`；manifest 格式与既有路径一致 | `~/data/interim/manifest.lance`（含 `render_eligible` 标志） |
+| **⑤ STEP → mesh** | Crossmanager（商业软件）：STEP → OBJ；`tools.py`：OBJ → OFF | OCC/OCP `STEPControl_Reader`：STEP → STL/OBJ → OFF；自动补全 OFF 转换 | `~/data/processed/off/<model>.off` 或 `mesh/<model>.*` |
+| **⑥ 渲染视图** | Sketch3DToolkit：12 视图，顶 6 + 底 6，224×224 px，每视图 PNG | `moderngl` / `pyrender`：相同相机位姿矩阵，相同分辨率与命名约定 | `~/data/processed/views/<model>/<model>_{0..11}.png` |
+| **⑦ 草图生成** | PhotoSketch 预训练 GAN，纯推理模式，对每视图做风格迁移 | 同 PhotoSketch 开源版（GitHub 官方仓库），推理脚本相同 | `~/data/processed/sketches/<model>/<model>_{0..11}.png` |
+| **⑧ B-rep 图提取** | STEP 拓扑 → UV-grid 图；见 §4.4 规格 | OCC 拓扑遍历 + UV 采样；同规格，见 §4.4 | `~/data/processed/graph_train.pt` / `graph_test.pt` |
+| **⑨ 切分** | `data_process.py`：10:2 比例，顶/底各保留 1 张 test 视图 | 沿用同脚本；评估协议对齐见 §6 | `~/data/processed/train/` / `test/` 子目录索引 |
+
+**目录树（落盘布局）：**
+
+```
+~/data/
+├── raw/
+│   └── step/                   # 原始 STEP 文件（按 ABC chunk 子目录）
+│       └── <chunk>/
+│           └── <model>.step
+├── interim/
+│   ├── deduplicate1.txt        # 去重1 剔除列表
+│   ├── deduplicate2.txt        # 去重2 剔除列表
+│   └── manifest.lance/         # 质量 manifest（LanceDB 格式）
+└── processed/
+    ├── off/                    # mesh 中间体
+    │   └── <model>.off
+    ├── views/                  # 多视图渲染
+    │   └── <model>/
+    │       ├── <model>_0.png
+    │       ├── <model>_1.png
+    │       └── ... (共12张)
+    ├── sketches/               # 草图（与 views 一一对应）
+    │   └── <model>/
+    │       ├── <model>_0.png
+    │       └── ... (共12张)
+    ├── graph_train.pt          # B-rep 图（训练集）
+    ├── graph_test.pt           # B-rep 图（测试集）
+    ├── train/                  # 训练集索引
+    └── test/                   # 测试集索引
+```
+
+---
+
+### 4.3 视图与草图布局约定
+
+#### 视图编号
+
+每个模型渲染 **12 张视图**，按半球划分：
+
+| 编号范围 | 所属半球 | 说明 |
+|----------|----------|------|
+| 0–5 | 顶半球（top） | 相机位于模型上方，6 个均匀方位角 |
+| 6–11 | 底半球（bottom） | 相机位于模型下方，6 个均匀方位角 |
+
+文件命名：`<model>_<idx>.png`，`idx` 为 0-based 整数，零填充无需统一（与既有工具链路径保持一致）。
+
+#### 草图编号
+
+草图与视图**一一对应**：`sketches/<model>/<model>_<idx>.png` 对应 `views/<model>/<model>_<idx>.png`，相同的 `idx`，相同的半球归属。PhotoSketch 对每张视图独立做风格迁移，不做跨视图融合。
+
+#### 训练时采样逻辑
+
+1. 从当前模型的草图库中**随机取一张草图**，编号为 `idx`。
+2. 依 `idx` 判断所属半球：`idx < 6` → `from_top=True`；`idx >= 6` → `from_top=False`。
+3. 取同半球的 **6 张视图**作为正样本视图组（`from_top=True` 取 views 0–5，否则取 6–11）。
+4. CNN 多视图分支对 6 张视图分别提取特征后 **max-pool 为单条 512-d 特征向量**。
+
+#### 检索时的双特征机制
+
+检索时对每个入库模型**分别产出顶/底两条特征向量**，各自写入检索库。这直接导致 `deduplicate_ratio=2`（每个物理模型占用 2 条库条目）。查询时，草图推理路径依同样规则判 `from_top`，只对对应半球的库条目做检索。
+
+来源确认：`deduplicate_ratio=2` 来自 Gitee `model-retrieval` 仓库 `data_process.py` 中的数据集构造逻辑，与上述半球双特征机制一致。
+
+---
+
+### 4.4 B-rep 图提取规格（最主要补全项）
+
+#### ComplexGNN 期望的图结构
+
+以下维度来自 `ComplexGNN/baseline.py` 及 `complex_gnn.py` 中对 `torch_geometric.data.Data` 的显式维度期望，**不是估计值**：
+
+| 张量字段 | 形状（每模型） | 含义 |
+|----------|---------------|------|
+| `x`（node_attr） | `[N_face, 14]` | 面属性：`node_attr_dim=14`，包含面类型编码与几何参数属性（来自 ComplexGNN/baseline.py） |
+| `x_grid`（node_grid） | `[N_face, 7, U, V]` | 面 UV-Net 风格网格，`node_grid_dim=7` 通道（来自 ComplexGNN/baseline.py） |
+| `edge_attr` | `[N_edge, 15]` | 边属性：`edge_attr_dim=15`，包含邻接关系与几何属性（来自 ComplexGNN/baseline.py） |
+| `edge_grid` | `[N_edge, 12, L]` | 边曲线 UV 网格，`edge_grid_dim=12` 通道（来自 ComplexGNN/baseline.py） |
+| `edge_index` | `[2, N_edge]` | COO 格式面邻接关系 |
+
+`N_face`、`N_edge`、`U`、`V`、`L` 均随模型几何复杂度变化，非固定值。
+
+#### 提取流程
+
+提取器的处理步骤（plan 级描述，不贴实现代码）：
+
+1. **读取 STEP**：OCC `STEPControl_Reader` 读入，`TransferRoot` + `Shape` 获取顶层 TopoDS_Shape。
+2. **拓扑遍历**：`TopExp_Explorer` 分别遍历所有 `TopoDS_Face`（节点）和 `TopoDS_Edge`（边），建立 face-index 与 edge-index 映射。
+3. **面属性提取**：对每个面，提取面类型（平面/柱面/锥面/环面/NURBS 等）的 one-hot 编码及几何参数，拼接为 14-d 向量。
+4. **面 UV 网格采样**：对每个面，在 UV 参数域均匀采样网格点，计算 7 通道几何量（坐标 xyz + 法向量 nxnynz + 掩码），产出 node_grid 张量。
+5. **边属性提取**：对每条边，提取邻接面对索引及边几何属性，产出 15-d 向量。
+6. **边曲线 UV 网格采样**：对每条边曲线，均匀采样 L 个点，计算 12 通道几何量，产出 edge_grid 张量。
+7. **构造 Data 对象**：将以上字段打包为 `torch_geometric.data.Data`，附加 `name` 字段。
+8. **聚合写出**：多个 Data 对象聚合为 list，按训练/测试切分分别保存为 `graph_train.pt` / `graph_test.pt`。
+
+#### 命名对齐
+
+`inference.py` 在图检索时对图名做 `name.replace('step', 'trimesh')` 来与 `views/`、`sketches/` 的子目录名对齐。提取器写入 `name` 字段时**须遵循相同约定**，确保推理时替换后能正确找到对应的视图/草图目录。
+
+建议 `name` 格式：`<model_id>.step`，使得 `replace('step', 'trimesh')` 后得到 `<model_id>.trimesh`，与 `views/<model_id>.trimesh/` 目录名一致（或按既有工具链路径的实际命名约定对齐，以已有 `views/` 目录名为准）。
+
+#### 图提取失败处理
+
+图提取失败（OCC 解析报错、拓扑退化、UV 采样异常等）的模型：
+
+1. 将 `model_id` 与失败原因写入 manifest（`graph_status=failed`）。
+2. 该模型在 BOTH 消融分支中**回退为 CNN-only 模式**：图特征分支输出置零，与 CNN 特征 concat 后正常参与训练与检索。
+3. **绝不丢弃该模型**：CNN 特征仍有效，该模型在检索库中保留完整条目。
+
+回退可行性依据：ComplexGNN BOTH 分支的特征融合为 concat 结构，图特征子向量置零不影响 CNN 子向量的梯度与推理，concat 总维度保持不变。
+
+---
+
+### 4.5 质量筛选与失败清单（显式可复现）
+
+#### 核心原则
+
+质量筛选必须满足以下四条：
+
+- **显式**：每个筛选决定有明确记录，可查询是哪条规则导致剔除。
+- **廉价**：probe 阶段只做拓扑遍历，不做渲染或 mesh 生成，单模型耗时可控。
+- **可解释**：筛选条件为人类可读的标志位（`too_complex`、`no_solid`、`degenerate`），而非隐式 timeout。
+- **可复现**：给定同一 STEP 文件，probe 结果确定性一致；阈值存于配置文件，不硬编码。
+
+**质量筛选不能是渲染 timeout 的隐式副产物**：若渲染因超时跳过某模型，该模型必须在 manifest 中显式标注 `render_status=timeout`，而非静默丢失。
+
+#### Manifest 表结构
+
+每个模型在 manifest 中占一行。存储格式为 LanceDB（或等价的可查询列式存储）。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `model_id` | string | 唯一标识，与 `views/`、`sketches/` 目录名对齐 |
+| `src_path` | string | 原始 STEP 文件绝对路径 |
+| `file_size_bytes` | int64 | 文件字节数（去重1依据） |
+| `n_faces` | int32 | 拓扑面数（probe 读取，不 mesh） |
+| `n_edges` | int32 | 拓扑边数 |
+| `n_solids` | int32 | 实体数 |
+| `quality_flags` | list\[string\] | 触发的质量标志：`too_complex` / `no_solid` / `degenerate` / `oversized` |
+| `render_eligible` | bool | probe 通过后设为 `true`；任一 flag 触发则 `false` |
+| `dedup1_status` | string | `kept` / `removed_size_dup` |
+| `dedup2_status` | string | `kept` / `removed_jsd_dup` |
+| `mesh_status` | string | `done` / `failed` / `skipped` |
+| `render_status` | string | `done` / `failed` / `timeout` / `skipped` |
+| `sketch_status` | string | `done` / `failed` / `skipped` |
+| `graph_status` | string | `done` / `failed` / `cnn_only_fallback` / `skipped` |
+| `split` | string | `train` / `test` / `excluded` |
+
+#### Probe 质量标志规则
+
+| 标志 | 触发条件 | 处理 |
+|------|----------|------|
+| `too_complex` | `n_faces` 超过上限阈值 | `render_eligible=false`；写入失败清单 |
+| `no_solid` | `n_solids == 0` | `render_eligible=false`；写入失败清单 |
+| `degenerate` | 拓扑遍历报错或面积为零面比例超限 | `render_eligible=false`；写入失败清单 |
+| `oversized` | `file_size_bytes` 超过上限阈值 | `render_eligible=false`；写入失败清单 |
+
+**阈值均为配置项，不硬编码：**
+
+```
+n_faces 上限：[待回填 | 回填依据: 首跑后看 n_faces/file_size 真实直方图，取高端长尾截断点]
+file_size 上限：[待回填 | 回填依据: 首跑后看 n_faces/file_size 真实直方图，取高端长尾截断点]
+```
+
+#### 各阶段写回机制
+
+每个执行单元（mesh、render、sketch、graph）完成或失败后，**立即将状态写回 manifest 对应字段**。写回操作为 upsert，确保中断重跑后状态不丢失。
+
+执行单元可据此按 status 字段过滤需要（重新）处理的模型，实现幂等重跑：
+
+- 只处理 `render_status IS NULL OR render_status = 'failed'` 的行。
+- 跳过 `render_eligible=false` 的行（无需尝试渲染）。
+
+#### 失败清单查询示例（意图描述）
+
+- 查 graph 提取失败但 CNN 可用的模型列表：`graph_status = 'cnn_only_fallback'`
+- 查渲染 timeout 的模型及其面数：`render_status = 'timeout'`，输出 `model_id, n_faces`
+- 查全链路通过的模型数：`split IN ('train', 'test') AND graph_status IN ('done', 'cnn_only_fallback')`
+
+---
+
+### 4.6 数据管线交付物
+
+数据管线阶段结束时，须交付以下四类产物：
+
+**① 完整数据集（8.4K 全量）**
+
+```
+~/data/processed/
+├── views/                  # 每模型 12 视图，顶0-5底6-11
+├── sketches/               # 每模型 12 草图，与 views 一一对应
+├── train/                  # 训练集索引（含视图/草图路径列表）
+├── test/                   # 测试集索引
+├── graph_train.pt          # 训练集 B-rep 图（list of {name, graph}）
+└── graph_test.pt           # 测试集 B-rep 图
+```
+
+数量预期：去重后约 8,400 个物理模型，每模型 12 视图 + 12 草图。`graph*.pt` 中包含全部可提取图的模型；图提取失败模型以 `cnn_only_fallback` 标注，不写入 `graph*.pt`（训练时置零填充）。
+
+**② Manifest 表（质量 flag + 各阶段 status + 失败清单）**
+
+```
+~/data/interim/manifest.lance/
+```
+
+manifest 覆盖原始集合中的**所有模型**，包括被去重剔除、质量不合格、各阶段失败的模型，确保全链路可追溯。
+
+**③ 几何复杂度分布直方图**
+
+首次 probe 跑完后，对 `n_faces` 与 `file_size_bytes` 各绘制一张分布直方图，以 PNG 形式保存：
+
+```
+~/data/interim/histogram_n_faces.png
+~/data/interim/histogram_file_size.png
+```
+
+用途：为 §4.5 中两个 `[待回填]` 阈值提供回填依据；同时作为扩规模评估的参考基准（判断新数据集的几何复杂度分布是否与 8.4K 集一致）。
+
+**④ 开源兼容层脚本 + 一致性说明**
+
+开源兼容层脚本纳入仓库版本控制，路径约定：
+
+```
+tools/
+├── pipeline_oss/
+│   ├── step_to_mesh.py         # OCC/OCP STEP→OFF/STL
+│   ├── render_views.py         # moderngl/pyrender 渲染 12 视图
+│   ├── extract_brep_graph.py   # OCC 拓扑→torch_geometric graph*.pt
+│   └── consistency_check.py   # 验证开源路径产物与既有工具链路径产物的结构一致性
+└── pipeline_oss/README.md      # 环境依赖、运行命令意图、已知差异说明
+```
+
+一致性说明须覆盖：
+
+- 文件命名约定是否与既有工具链路径完全一致（`<model>_<idx>.png` 格式）。
+- UV 采样精度/网格大小是否与 ComplexGNN 期望维度对齐。
+- 已知可接受差异（如 mesh 面数因工具不同略有差异，但不影响视图渲染一致性）。
+- 已知不可接受差异（如 `name` 字段命名规则偏差，会导致 `inference.py` 对齐失败）及修复方式。
+
+---
 
 ## 5. 模型与训练
 
