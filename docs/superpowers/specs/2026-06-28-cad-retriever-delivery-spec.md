@@ -2534,6 +2534,67 @@ Data(
 
 **回退**：几何无显著增益（R3 对 R1 ΔTop-1 < 2 pp）→ 取更简单的 CNN-only，省去 graph 单元后续维护（→ Part 10）。通过定稿主干的分离编码器契约隔离，build-artifact 只认 `sketch_model`，不关心主干是哪条臂胜出。
 
+**run 配置 schema**（每个消融 run 的输入，对应 §5.2 四轴 + §5.3 R1–R9）：
+
+```json
+{
+  "run_id": "R3",
+  "sketch_backbone": "se_resnet50" | "clip_vit_lora",
+  "cad_branch": "CNN" | "GNN" | "BOTH",
+  "domain_loss": false,                  // 域对抗开/关
+  "contrastive_loss": "hard_triplet" | "infonce",
+  "seed": 42,                            // 阶段 D 复现用 137
+  "card": 0,                             // 3 卡并行时的卡分配
+  "graph_hidden_dim": 512,               // 5090（sourced）
+  "lr": 1e-3                             // V2 起点（sourced）
+}
+```
+
+**消融报告 schema**（每 run 一条，train 产出）：
+
+```json
+{
+  "run_id": "R3",
+  "top1": "<实测>", "top10": "<实测>", "top20": "<实测>",
+  "top50": "<实测>", "top100": "<实测>",
+  "ci95_halfwidth": "<bootstrap 95% CI 半宽>",
+  "delta_top1_vs_R1": "<相对基线锚点>",
+  "effective_rank": "<留出集 embedding 有效秩>",
+  "random_pair_cosine": "<随机草图对平均余弦>"
+}
+```
+
+**实现任务序列（TDD / 按阶段）**：
+
+- [ ] T1 写失败测试：`test_collapse_probe_judges_clip` —— 冻结 CLIP embed 后，低秩锥输入 → 判降优先级；健康秩 → 放行。
+- [ ] T2 实现阶段 A 探针（有效秩 + 随机对余弦 + 零样本 Top-100），跑 T1 至通过。
+- [ ] T3 写失败测试：`test_stage_b_two_runs_parallel` —— R1/R3 分占两卡、各自独立存档无串扰。
+- [ ] T4 实现阶段 B 双卡编排，跑 T3 至通过。
+- [ ] T5 写失败测试：`test_decision_rule_delta_and_seed` —— 仅当 ΔTop-1≥2pp 且换种子成立才判「真」。
+- [ ] T6 实现决策规则判定，跑 T5 至通过。
+- [ ] T7 写失败测试：`test_nan_loss_aborts` —— 触发 NaN 的配置 → 抛异常停训，不产出 NaN 权重。
+- [ ] T8 接入 NaN 守卫，跑 T7 至通过。
+- [ ] T9 写失败测试：`test_resume_from_checkpoint` —— 中断的 run 从 checkpoint 续训而非重头。
+- [ ] T10 实现断点续训，跑 T9 至通过。
+- [ ] T11 集成：跑探针 → B → C 分波 → D，产出消融报告，按决策规则选主干并换种子复现。
+
+**量化验收（细化）**：按 §5.5 决策规则选出主干（ΔTop-1≥2pp 且换种子成立）；最优配置换第二种子复现一致；消融报告每 run 含 Top-1/10/20/50/100 + bootstrap 95% CI；坍缩检测（有效秩 / 随机对余弦）无未处理异常；3 卡并行各 run 独立存档无串扰；定稿主干可 `extract_mode='separate'` 分离导出 sketch/view 编码器。
+
+**测试矩阵（细化）**：
+
+| 用例 | 输入 | 期望 | 失败信号 |
+|------|------|------|----------|
+| 探针放行 | 健康秩 CLIP embed | 放行进入消融矩阵 | 误降级或误放行 |
+| 探针降级 | 低秩锥 embed（余弦≈0.9+） | 降 CLIP 臂优先级 | 坍缩臂烧算力 |
+| 单 run 收敛 | 一组消融配置 | Top-K + CI 产出 | 不收敛 / 指标异常 |
+| 决策规则真差异 | ΔTop-1≥2pp 且换种子成立 | 判「真」、采纳 | 噪声当真实差异 |
+| 决策规则平手 | ΔTop-1<2pp | 取更简单/便宜架构 | 过拟合复杂度偏好 |
+| NaN 停训 | 触发 NaN 的配置 | 抛异常停训 | 静默产出 NaN 权重 |
+| 断点续训 | 中断的 run | 从 checkpoint 续 | 从头重训 |
+| 3 卡并行无冲突 | 3 run 分占 3 卡 | 互不干扰、各自存档 | 卡间数据/存档串扰 |
+| 分离导出 | 定稿主干 | sketch/view 编码器可单独导出 | 导出耦合无法分离 |
+| 换种子复现 | 最优配置 seed=137 | 差异仍成立 | 结果不可复现 |
+
 ### 9.7 build-artifact 单元
 
 **职责**：用选定主干对全库提特征，导出查询侧 ONNX 编码器，打包成 `artifact/` 目录（§7.4 契约）。**不做**训练（train 单元）、不做在线服务（serve 单元）。
@@ -2570,6 +2631,50 @@ Data(
 **失败处理**：对齐 cosine < 0.999 → 阻断打包、不产出 artifact；维度/映射不一致 → 校验失败、记录差异；均可在修正后重跑（只重跑提特征+打包，不重训）。
 
 **回退**：ViT-LoRA 导出数值漂移 → 取 CNN 主干（导出风险低，对齐门易过，→ Part 10）。通过 §7.4 产物契约隔离：换主干只要产出同样的 `.npy` + `.onnx`，serve 完全无感。
+
+**对齐门契约**（PyTorch↔ONNX 数值一致性，build-artifact 内置）：
+
+```json
+{
+  "parity_gate": {
+    "mean_cosine": "<PyTorch 与 ONNX 输出的平均余弦，须 > 0.999>",
+    "topk_agreement": "<同一批查询 top-K 一致比例，须 == 1.0>",
+    "sample_count": "<对齐测试用的查询样本数>",
+    "verdict": "pass" | "fail"        // fail → 阻断打包，不产出 artifact
+  }
+}
+```
+
+**实现任务序列（TDD）**：
+
+- [ ] T1 写失败测试：`test_extract_features_two_rows_per_model` —— V2 每 model_id 在 embeddings 中占 2 行（顶/底）。
+- [ ] T2 实现全库提特征，跑 T1 至通过。
+- [ ] T3 写失败测试：`test_embeddings_l2_normalized` —— `embeddings.npy` 每行 L2 范数 ≈ 1。
+- [ ] T4 实现 L2 归一化写盘，跑 T3 至通过。
+- [ ] T5 写失败测试：`test_onnx_parity_gate_blocks_on_drift` —— 人为引入漂移 → 对齐门 fail、阻断打包。
+- [ ] T6 实现对齐门（mean cosine>0.999 且 top-K 一致），跑 T5 至通过。
+- [ ] T7 写失败测试：`test_clip_export_requires_merge` —— CLIP-ViT+LoRA 未 `merge_and_unload()` 即导出 → 校验拦截。
+- [ ] T8 实现 merge 前置 + 导出，跑 T7 至通过。
+- [ ] T9 写失败测试：`test_manifest_version_gate_fields` —— manifest 含 schema_version/dim/metric，serve dry-run 对不匹配拒启动。
+- [ ] T10 实现 manifest 写入 + 版本门字段，跑 T9 至通过。
+- [ ] T11 集成：用定稿主干端到端打包，serve dry-run 校验 artifact 一致性。
+
+**量化验收（细化）**：`artifact/` 六项齐全（manifest/embeddings/ids/metadata/onnx/thumbnails）；`embeddings.npy` 为 float32 `[N,512]` 行主序、每行 L2 范数≈1；每 model_id 占 2 行（顶/底）；对齐门通过（mean cosine>0.999 且 top-K 一致）；manifest 含版本门字段（schema_version/dim/metric）；通过 serve 启动校验（维度/行数/映射一致）。
+
+**测试矩阵（细化）**：
+
+| 用例 | 输入 | 期望 | 失败信号 |
+|------|------|------|----------|
+| CNN 导出 | SE-ResNet50 主干 | 干净导出、对齐门过 | 算子不支持 / 漂移 |
+| CLIP 导出 | merge_and_unload 后 | 对齐门过 | adapter 未合并致结构错 |
+| 未 merge 拦截 | LoRA 未合并即导出 | 校验拦截 | adapter 当独立分支导出 |
+| 对齐门失败拦截 | 漂移的导出 | cosine<0.999 阻断打包 | 漂移产物进入服务 |
+| top-K 不一致拦截 | top-K 顺序变化 | 对齐门 fail | 排序错乱产物上线 |
+| 双行/模型 | V2 提特征 | 每 model_id 占 2 行 | 行数错致去重失效 |
+| L2 归一化 | 写盘的 embeddings | 每行范数≈1 | serve 点积语义错 |
+| manifest 版本门 | 维度/metric 不匹配 | serve dry-run 拒启动 | 不匹配产物上线 |
+| 维度不匹配检出 | ONNX 维 ≠ embeddings 列 | 校验拦截 | 检索结果错乱 |
+| 重跑一致 | 同主干二次打包 | 产物等价 | 不可复现 |
 
 ### 9.8 serve 单元
 
