@@ -2718,6 +2718,62 @@ Data(
 
 **回退**：`ort` + CUDA EP 在 5090 打包/链接不顺 → 回退 FastAPI + onnxruntime-gpu，`/search` API 完全一致（→ Part 10）。通过 §7.5 `/search` JSON 契约隔离：换服务实现，frontend 无感、零能力损失。
 
+**端点契约汇总**（serve 暴露）：
+
+| 端点 | 方法 | 输入 | 输出 | 鉴权 |
+|------|------|------|------|------|
+| `/healthz` | GET | 无 | `{status:"ok", artifact_version}` | 否 |
+| `/search` | POST | multipart（image + 可选 k） | §7.5 JSON | 是 |
+| `/models/:id/thumbnail` | GET | model_id | 缩略图字节 | 是 |
+| `/models/:id/geometry` | GET | model_id | STEP/mesh（路径白名单） | 是 |
+
+**启动校验序列**（任一不过即 panic 拒启动）：
+
+```
+1. 读 manifest.json → 校验 schema_version 在支持集内
+2. 校验 ONNX 输出维度 == manifest.dim == embeddings.npy 列数
+3. 校验 embeddings.npy 行数 == ids.json 长度
+4. 校验每个 ids 行可映射到 metadata.json 条目
+5. 校验 manifest.metric ∈ {ip, l2} 且与 embeddings 归一化状态一致
+6. 加载 ONNX 编码器：CUDA EP 优先，失败回退 CPU EP（记日志）
+全部通过 → 进入 serving；任一失败 → panic + 明确差异信息
+```
+
+**实现任务序列（TDD）**：
+
+- [ ] T1 写失败测试：`test_startup_rejects_dim_mismatch` —— ONNX 维 ≠ embeddings 列 → 启动 panic。
+- [ ] T2 实现启动校验序列，跑 T1 至通过。
+- [ ] T3 写失败测试：`test_search_returns_topk_contract` —— 合法草图 → §7.5 JSON 形状正确、top-K 有序。
+- [ ] T4 实现 `/search`（预处理 + 点积 + 去重），跑 T3 至通过。
+- [ ] T5 写失败测试：`test_dedup_by_model_id_top_bottom` —— 顶/底两条向量按 model_id 取最优后 top-K 无重复 model_id。
+- [ ] T6 实现去重逻辑，跑 T5 至通过。
+- [ ] T7 写失败测试：`test_image_bomb_rejected_before_decode` —— 小压缩包声明巨尺寸 → 解码前按头部拒绝（400）。
+- [ ] T8 实现图片炸弹防护，跑 T7 至通过。
+- [ ] T9 写失败测试：`test_oversize_413_bad_mime_415_ratelimit_429` —— 各安全边界返回正确错误码。
+- [ ] T10 实现 body 限/MIME 白名单/限流，跑 T9 至通过。
+- [ ] T11 写失败测试：`test_unauth_request_rejected` —— 非 `/healthz` 端点无 token → 401/403。
+- [ ] T12 实现鉴权中间件，跑 T11 至通过。
+- [ ] T13 集成：起服务、走完整查询、验证延迟与全部安全项。
+
+**量化验收（细化）**：`/search` 端到端返回正确 top-K（无重复 model_id）；单卡 5090 p95 延迟交互级；启动校验拒绝任一不匹配 artifact；§7.7 安全项全部到位（body/分辨率/MIME/超时/鉴权/限流/路径白名单）；CUDA EP 不可用时回退 CPU EP 仍可服务；**无鉴权端点不上线**。
+
+**测试矩阵（细化）**：
+
+| 用例 | 输入 | 期望 | 失败信号 |
+|------|------|------|----------|
+| 正常查询 | 合法草图 | 正确 top-K + JSON 契约 | 结果错 / 格式不符 |
+| model_id 去重 | 顶/底两条命中同模型 | top-K 无重复 model_id | 同模型重复占位 |
+| 维度不匹配拒启动 | 错配 artifact | 启动 panic 拒启 | 错配产物服务 |
+| 行数不匹配拒启动 | embeddings 行 ≠ ids 长 | panic | 越界访问 |
+| 图片炸弹防护 | 小包解码巨图 | 解码前拒绝（400） | 内存耗尽 |
+| 超 body 限 | 超大上传 | 413 | 接受并 OOM |
+| 非法 MIME | 非图片类型 | 415 | 尝试解码崩溃 |
+| 限流 | 高频请求 | 429 + Retry-After | 无限流被打挂 |
+| 无鉴权请求 | 缺 token | 401/403 | 无鉴权访问数据 |
+| 路径穿越 | `../` 注入 id | 路径白名单拒绝 | 任意文件读取 |
+| CUDA EP 回退 CPU | CUDA EP 不可用 | 回退 CPU EP 仍服务 | 启动失败 |
+| 超时 | 处理超时限 | 504 | 请求挂起无响应 |
+
 ### 9.9 frontend 单元
 
 **职责**：提供草图上传与结果展示界面，调用 `/search`。**不做**任何检索计算，只是 `/search` 契约的消费者与展示层。
@@ -2754,6 +2810,47 @@ Data(
 **失败处理**：serve 返回 503 → 前端展示「服务暂不可用」并允许重试；几何加载失败 → 仅 3D 区降级，不影响结果列表。
 
 **回退**：与 serve 经 `/search` JSON 契约解耦——serve 从 Rust 换到 FastAPI 前端完全无感。通过 §7.5 契约隔离，前端只依赖 JSON 形状不依赖服务实现。
+
+**前端状态契约**（UI 对 `/search` 响应的状态映射）：
+
+| serve 响应 | 前端状态 | 展示 |
+|------------|----------|------|
+| 200 + 非空 results | 正常 | top-K 缩略图网格 + 分数 + 排名 |
+| 200 + 空 results | 空结果 | 「未找到匹配模型」友好提示 |
+| 413 / 415 | 输入不合法 | 「图片过大/格式不支持」+ 客户端预校验提示 |
+| 429 | 限流 | 「请求过于频繁，请稍后重试」 |
+| 503 | 服务不可用 | 「服务暂不可用」+ 重试按钮 |
+
+**实现任务序列（TDD）**：
+
+- [ ] T1 写失败测试：`test_renders_topk_grid` —— 给定 mock `/search` 响应，渲染 K 张结果卡片含缩略图/分数/排名。
+- [ ] T2 实现结果网格渲染，跑 T1 至通过。
+- [ ] T3 写失败测试：`test_upload_posts_multipart` —— 上传草图触发 multipart POST 到 `/search`。
+- [ ] T4 实现上传栏 + fetch，跑 T3 至通过。
+- [ ] T5 写失败测试：`test_empty_results_friendly` —— 空 results → 友好「无匹配」态而非空白/报错。
+- [ ] T6 实现空态，跑 T5 至通过。
+- [ ] T7 写失败测试：`test_503_shows_retry` —— serve 503 → 「服务不可用」+ 重试，不白屏。
+- [ ] T8 实现错误态映射，跑 T7 至通过。
+- [ ] T9 写失败测试：`test_click_opens_3d_viewer` —— 点击结果卡片 → three.js 查看器加载几何（经受保护端点）。
+- [ ] T10 接入 3D 查看器，跑 T9 至通过。
+- [ ] T11 集成：对 mock `/search` 联调全流程，再切真实 serve 验证一致。
+
+**量化验收（细化）**：demo 可演示完整查询流程（上传→结果→3D）；对 mock `/search` 与真实 serve 均可跑且行为一致；空结果/各错误码均有友好态（无白屏、无未捕获异常）；大图上传有客户端预校验（不必打到 serve 才被拒）；3D 查看器加载失败仅降级 3D 区不影响结果列表。
+
+**测试矩阵（细化）**：
+
+| 用例 | 输入 | 期望 | 失败信号 |
+|------|------|------|----------|
+| 正常查询展示 | 真实 /search 响应 | top-K 网格 + 分数渲染 | 渲染错位 / 分数缺失 |
+| 上传 multipart | 草图文件 | POST multipart 到 /search | 请求格式错 serve 拒收 |
+| 空结果 | 空 results | 友好「无匹配」提示 | 报错或空白 |
+| serve 503 | 服务不可用 | 「暂不可用」+ 重试 | 白屏 / 未捕获异常 |
+| 限流 429 | 高频触发 | 「请求过频」提示 | 静默失败 |
+| 大图预校验 | 超限草图 | 客户端拦截提示 | 直接打到 serve 才被拒 |
+| 3D 查看 | 点击结果 | three.js 加载几何 | 查看器崩溃 |
+| 3D 加载失败 | 几何端点失败 | 仅 3D 区降级 | 整页崩溃 |
+| serve 实现切换 | Rust→FastAPI | 前端无感、行为一致 | 前端因实现变化报错 |
+| mock↔真实一致 | 同输入两后端 | 展示一致 | 仅 mock 能跑 |
 
 ## 10. 风险登记册
 
