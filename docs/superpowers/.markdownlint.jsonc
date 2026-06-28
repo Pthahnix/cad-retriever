@@ -1,0 +1,21 @@
+{
+  // markdownlint 配置 — 适用于 CAD retriever 交付 spec（中文技术文档）
+  // 仅禁用与 CJK 技术文档不符或纯样式的规则；结构性规则保持开启。
+  "default": true,
+
+  // MD013 line-length：80 字符行长上限不适合中文长句与表格；本文以语义换行为准。
+  "MD013": false,
+
+  // MD060 table-column-style：表格管道空格风格为纯样式；本文表格已内部一致、可读。
+  "MD060": false,
+
+  // MD036 no-emphasis-as-heading：本文用 **①…** / **小标题：** 作为段内子标签，
+  // 是有意的轻量分隔，转为真标题会过度碎化目录（TOC 仅到 ### 级）。
+  "MD036": false,
+
+  // MD033 inline-HTML：mermaid 节点标签内用 <br/> 换行，是 mermaid 必需语法。
+  "MD033": false,
+
+  // MD032 blanks-around-lists：表格/代码块紧邻列表时本文有意紧排；保持阅读密度。
+  "MD032": false
+}
