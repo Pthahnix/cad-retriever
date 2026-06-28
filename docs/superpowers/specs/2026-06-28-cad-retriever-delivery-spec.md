@@ -393,14 +393,15 @@ Part 12 交付清单中的全部必交项均已完成并可验证，包括但不
 
 ### 2.1 代码资产（逐模块表）
 
-本系统的代码资产是一套完整可跑的双分支 sketch→CAD 实例检索代码库，托管于 Gitee `model-retrieval` 仓库。各模块职责如下：
+本系统的代码资产是一套完整可跑的双分支 sketch→CAD 实例检索代码库（`model-retrieval`）。各模块职责如下：
 
 | 模块 | 文件 | 职责 |
 |------|------|------|
 | 训练入口 | `train.py` / `trainer.py` | 读取 config 展开超参、初始化模型与数据加载器、组装 loss、配置优化器与调度器、执行训练循环、按 epoch 存档 checkpoint |
 | 测试检索 | `test.py` / `inference.py` | 加载 checkpoint、对全库视图提取特征、构建 FAISS 索引、对查询草图提取特征后执行检索、计算并报告 Top-K 精度指标 |
 | 模型主干 | `model/Baseline/networks/baseline.py` | 定义双分支 `Baseline` 类（草图分支 + 视图分支共享 SE-ResNet50 骨架）；`baseline_step1`～`baseline_step5` 为渐进消融变体，逐步叠加 B-rep 图、跨模态注意力等组件 |
-| 草图/视图编码器 | `model/Baseline/networks/` 内 encoder 子模块 | 共享 SE-ResNet50 骨架提取单张图像特征；多视图路径采用 max-pool 将 `n_views` 帧特征聚合为单条描述子 |
+| CNN 骨架 | `model/Baseline/networks/`（SE-ResNet50） | 共享 SE-ResNet50 骨架（含 SE 通道注意力块），对单张图像（草图帧或视图帧）提取特征向量；草图分支与视图分支共享同一骨架权重 |
+| 草图/视图编码器 | `model/Baseline/networks/` 内 encoder 子模块 | 封装共享骨架：草图分支直接编码单帧；多视图路径将 `n_views` 帧骨架特征经 max-pool 聚合为单条描述子 |
 | B-rep 图编码器 | `model/Baseline/networks/complex_gnn.py` + `encoders/` | UV-Net 风格：对 B-rep 面/边的 UV-grid 采样特征分别建图、经 GNN 多轮消息传递后多聚合（mean/max/attention）输出固定维描述子；依赖外部预计算的 `graph*.pt` |
 | 可选组件 | `cross_attention.py` / `channel_grouping.py` / `feature_fusion.py` / `domain_discriminator.py` | 跨模态注意力（草图↔视图对齐）；通道分组关键区域加权；多视图特征融合；域对抗（梯度反转层，使编码器对 sketch/view 域无关） |
 | 损失函数 | `utils/loss.py` | `HardTripletMarginLoss`（V2 默认）；`InfoNCE`；`PairLoss`；`CorrLoss`；可按 config 组合叠加 |
@@ -417,6 +418,7 @@ Part 12 交付清单中的全部必交项均已完成并可验证，包括但不
 - **`n_views = 6`**：单次前向传播时传入编码器的视图帧数，顶或底各取一组6帧。（来源：config.py）
 - **`deduplicate_ratio = 2`**：检索时顶/底视图各产出一条特征向量，同一模型在特征库中占2条记录；检索后按此比值折叠去重以对齐到模型级。（来源：config.py）
 - **`collate_fn = abc_collate_fn_v2`**：数据集专用批次整理函数，处理草图分辨率变长、视图张量堆叠对齐。（来源：`data/retrieval/ABC/V2/dataset.py`）
+- **特征描述子维度 = 512**：草图编码器与 CAD 编码器输出的嵌入向量维度，是公共嵌入空间的维度，也是特征库 `embeddings.npy` 的列数与检索索引的向量维度。（来源：`baseline.py` 编码器输出层 / 部署产物契约 §7）
 
 这些值在整个 8.4K 阶段保持不变，后续扩展数据规模时需同步更新 `num_classes` 及相关路径。
 
@@ -444,8 +446,8 @@ Part 12 交付清单中的全部必交项均已完成并可验证，包括但不
 **ABC 下载器**
 项目内已有针对 ABC 数据集的批量下载脚本，具备：7z 归档头校验（防止部分下载被当完整文件处理）、5× 重试带指数退避、断点续传（resume）、代理透传支持。M1 数据落地阶段可直接复用，只需配置目标路径与代理参数。
 
-**download-probe 设计**
-基于 LanceDB manifest 的下载状态追踪 + 拓扑探查质量筛选设计已完成。manifest 显式记录每个模型的下载状态、解析状态与质量标志，使失败与筛除可观测、可复现，避免隐式跳过带来的数据偏差。M1/M2 阶段直接按此设计实现。
+**download-probe 规格**
+download-probe 规格定义了基于 LanceDB manifest 的下载状态追踪与拓扑探查质量筛选接口：manifest 显式记录每个模型的下载状态、解析状态与质量标志，使失败与筛除可观测、可复现，避免隐式跳过带来的数据偏差。M1/M2 阶段按此规格实现。
 
 **`web/` Astro 站点 + three.js 模型查看器**
 前端代码库 `web/` 已包含基于 Astro 构建的静态站点骨架与 three.js 的 STEP/mesh 三维查看器组件。M6 前端交付阶段以此为基础，添加草图输入框、检索结果列表与相似度得分展示，复用已有的构建配置与组件约定。
